@@ -1,39 +1,10 @@
----
-layout: post
-title: llama1-3 模型结构详解
-date: 2024-10-21 20:00:00
-summary: llama1-3 模型结构代码如何实现，模型结构分析。
-categories: Transformer
----
+## llama1
 
-- [一 llama1 模型](#一-llama1-模型)
-  - [1.1 模型整体结构](#11-模型整体结构)
-  - [1.2 RMSNorm](#12-rmsnorm)
-  - [1.3 FFN\_SwiGLU](#13-ffn_swiglu)
-    - [FFN 发展史](#ffn-发展史)
-    - [FFN\_SwiGLU](#ffn_swiglu)
-  - [1.4 RoPE 旋转位置编码](#14-rope-旋转位置编码)
-    - [RoPE 代码实现](#rope-代码实现)
-  - [1.5 基于开源 LLaMA 1 微调的模型](#15-基于开源-llama-1-微调的模型)
-- [二 llama2 模型](#二-llama2-模型)
-  - [2.1 llama2 概述](#21-llama2-概述)
-  - [2.2 kv cache 优化-GQA](#22-kv-cache-优化-gqa)
-- [三 llama3 模型](#三-llama3-模型)
-  - [3.1 llam3 概述](#31-llam3-概述)
-  - [3.2 llam3.1 概述](#32-llam31-概述)
-  - [3.3 llam3.2 概述](#33-llam32-概述)
-    - [轻量级模型 1B 和 3B](#轻量级模型-1b-和-3b)
-- [参考资料](#参考资料)
-
-> 本文主要从模型推理角度去总结 llama1-3 模型论文和报告，因此没有涉及到数据集处理、模型训练及试验报告的细节，更多的是介绍了 LLaMA 模型的主要思想以及模型结构的细节。
-
-## 一 llama1 模型
+论文地址：[LLaMA: Open and Efficient Foundation Language Models](https://link.zhihu.com/?target=https%3A//arxiv.org/pdf/2302.13971.pdf)
 
 `LLaMA`（Large Language Model Meta AI）是 由 Meta AI 发布的一个开放且高效的大型基础语言模型，共有 `7B`、`13B`、`33B`、`65B`（650 亿）四种版本。其数据集来源都是公开数据集，无任何定制数据集，保证了其工作与开源兼容和可复现，整个训练数据集在 token 化之后大约包含 1.4T 的 token。
 
 关于模型性能，LLaMA 的性能非常优异：具有 130 亿参数的 LLaMA 模型「在大多数基准上」可以**胜过** GPT-3（ 参数量达 1750 亿），而且可以在单块 V100 GPU 上运行；而最大的 650 亿参数的 LLaMA 模型可以媲美谷歌的 Chinchilla-70B 和 PaLM-540B。
-
-关于训练集，其来源都是公开数据集，无任何定制数据集，保证了其工作与开源兼容和可复现。整个训练数据集在 token 化之后大约包含 1.4T 的 token。其中，LLaMA-65B 和 LLaMA-33B 是在 1.4万亿个 `token` 上训练的，而最小的模型 LLaMA-7B 是在 1万亿个 token 上训练的。
 
 Hoffmann 等人（2022）最近的工作表明了，在给定的计算预算下，最佳性能不是由最大的模型实现的，而是基于更多数据上的训练较小模型实现的。
 
@@ -41,18 +12,87 @@ Hoffmann 等人（2022）最近的工作表明了，在给定的计算预算下�
 
 LLaMA **优势**在于其**只使用公开可用的数据**，这可以保证论文的工作与开源兼容和可复现。之前的大模型要么使用了不公开的数据集去训练从而达到了 state-of-the-art，如 Chinchilla、PaLM 或 GPT-3；要么使用了公开数据集，但模型效果不是最佳无法和 PaLM-62B 或 Chinchilla 相竞争，如 OPT、GPT-NeoX、BLOOM 和 GLM。
 
-### 1.1 模型整体结构
+### 1.1 LLaMA预训练数据
+
+LLaMa 预训练数据大约包含 1.4T tokens，对于绝大部分的训练数据，在训练期间模型只见到过1次，Wikipedia 和 Books 这两个数据集见过2次。
+
+| 数据集        | 样本比例 | Epochs | 磁盘大小 |
+| ------------- | -------- | ------ | -------- |
+| CommonCrawl   | 67.0%    | 1.10   | 3.3 TB   |
+| C4            | 15.0%    | 1.06   | 783 GB   |
+| Github        | 4.5%     | 0.64   | 328 GB   |
+| Wikipedia     | 4.5%     | 2.45   | 83 GB    |
+| Books         | 4.5%     | 2.23   | 85 GB    |
+| ArXiv         | 2.5%     | 1.06   | 92 GB    |
+| StackExchange | 2.0%     | 1.03   | 78 GB    |
+
+English CommonCrawl [67%]：对五个 CommonCrawl 数据集进行预处理，时间跨度从2017年到2020年，使用 CCNet 流水线。该过程在行级别进行数据去重，使用 fastText 线性分类器进行语言识别，以删除非英语页面，并使用 n-gram 语言模型过滤低质量内容。此外，还训练了一个线性模型，用于将页面分类为 Wikipedia 中的引用页面与随机抽样页面，并丢弃未被分类为引用的页面。
+
+C4 [15%]。C4的预处理还包括去重和语言识别步骤：与 CCNet 的主要区别在于质量过滤，这主要依赖于标点符号的存在或网页中的词语和句子数量等启发式方法。
+
+Github [4.5%]。使用 Google BigQuery 上可用的公共 GitHub 数据集。只保留了在 Apache、BSD 和 MIT 许可下发布的项目。此外，使用基于行长度或字母数字字符比例的启发式方法过滤低质量文件，并使用正则表达式删除了诸如头文件之类的样板文件。最后，对生成的数据集进行了文件级别的去重，使用完全匹配的方法
+
+Wikipedia [4.5%]。添加了截至2022年6月至8月的 Wikipedia 数据，涵盖20种语言。处理数据以去除超链接、评论和其他格式样板。
+
+Gutenberg and Books3 [4.5%]。添加了两个书的数据集，分别是 Gutenberg 以及 ThePile (训练 LLM 的常用公开数据集) 中的 Book3 部分。处理数据时执行重复数据删除，删除内容重叠超过 90% 的书籍。
+
+ArXiv [2.5%]。处理了arXiv Latex文件，以添加科学数据到数据集中。移除了第一节之前的所有内容，以及参考文献。还移除了.tex文件中的注释，并且内联展开了用户编写的定义和宏，以增加论文之间的一致性。
+
+Stack Exchange [2%]。作者添加了 Stack Exchange，这是一个涵盖各种领域的高质量问题和答案网站，范围从计算机科学到化学。作者从 28 个最大的网站保留数据，从文本中删除 HTML 标签并按分数对答案进行排序
+
+Tokenizer。使用字节对编码（BPE）算法对数据进行分词，使用 SentencePiece 的实现。值得注意的是，作者将所有数字分割成单个数字。
+
+```python
+import os
+from logging import getLogger
+from typing import List
+
+from sentencepiece import SentencePieceProcessor
+
+logger = getLogger()
+
+class Tokenizer:
+    def __init__(self, model_path: str):
+        # reload tokenizer
+        assert os.path.isfile(model_path), model_path
+        self.sp_model = SentencePieceProcessor(model_file=model_path)
+        logger.info(f"Reloaded SentencePiece model from {model_path}")
+
+        # BOS / EOS token IDs
+        self.n_words: int = self.sp_model.vocab_size()
+        self.bos_id: int = self.sp_model.bos_id()
+        self.eos_id: int = self.sp_model.eos_id()
+        self.pad_id: int = self.sp_model.pad_id()
+        logger.info(
+            f"#words: {self.n_words} - BOS ID: {self.bos_id} - EOS ID: {self.eos_id}"
+        )
+        assert self.sp_model.vocab_size() == self.sp_model.get_piece_size()
+
+    def encode(self, s: str, bos: bool, eos: bool) -> List[int]:
+        assert type(s) is str
+        t = self.sp_model.encode(s)
+        if bos:
+            t = [self.bos_id] + t
+        if eos:
+            t = t + [self.eos_id]
+        return t
+
+    def decode(self, t: List[int]) -> str:
+        return self.sp_model.decode(t)
+```
+
+### 1.2 模型整体结构
 
 和 `GPT` 系列一样，LLaMA 模型也是 `Decoder-only` 架构，但结合前人的工作做了一些改进，比如：
 
 1. `Pre-normalization` [GPT3]. 为了提高训练稳定性，LLaMA 对每个 transformer 子层的输入进行归一化，使用 `RMSNorm` 归一化函数，Pre-normalization 由Zhang和Sennrich（2019）引入。使用 `RMSNorm` 的好处是不用计算样本的均值，速度提升了40%
-2. `FFN_SWiGLU` [PaLM]。结构上使用门控线性单元，且为了保持 FFN 层参数量不变，将隐藏单元的数量调整为 $\frac{2}{3}4d$ 而不是 PaLM 论文中的 4d，同时将 ReLU 替换为 `SiLU` [Shazeer,2020]激活，引入以提高性能。
-3. `Rotary Embeddings` [GPTNeo]。模型的输入不再使用 `positional embeddings`，而是在网络的每一层添加了 positional embeddings (`RoPE`)，RoPE 方法由Su等人（2021）引入。
+2. `FFN_SWiGLU` [PaLM]。结构上使用门控线性单元，且为了保持 FFN 层总参数量不变，将隐藏单元的数量调整为 $\frac{2}{3}4d$ 而不是 PaLM 论文中的 4d，同时将 ReLU 替换为 `SiLU` [Shazeer,2020]激活，引入以提高性能。
+3. `Rotary Embeddings` [GPTNeo]。模型的输入不再使用 `positional embeddings`，而是在网络的每一层添加了 positional embeddings (`RoPE`)，RoPE 方法由Su等人（2021）引入
 
 完整的模型结构图如下图所示:
 
 <center>
-<img src="../images/llama/llama_architecture4.png" width="80%" alt="完整的llama模型结构">
+<img src="../images/llama/llama_architecture5.png" width="80%" alt="完整的llama模型结构">
 </center>
 
 > [processon 在线浏览](https://www.processon.com/view/link/67163481a8011b320f2af67f?cid=67161b027f25232473eba8d3)
@@ -63,7 +103,7 @@ llama 模型系列的超参数详细信息在表 2 中给出。
 <img src="../images/llama/llama_parameters.png" width="60%" alt="llama_parameters">
 </div>
 
-### 1.2 RMSNorm
+### 1.3 RMSNorm
 
 **LayerNorm**：
 
@@ -75,7 +115,7 @@ $$
 \text{LN}(x): \hat{x}_i =  \gamma \odot \frac{x_i - \hat{\mu}}{\hat{\sigma}} + \beta
 $$
 
-其中 $\odot$ 表示按位置乘，$\gamma, \beta \in \mathbb{R}^d$ 是缩放参数（scale）和偏移参数（shift），代表着把第 $i$ 个特征的 batch 分布的均值和方差移动到 $beta^i, \gamma^i$。$\gamma$ 和 $\beta$ 是需要与其他模型参数一起学习的参数。 $\hat{\mu}$ 和 $\hat{\sigma}$ 表示特征向量所有元素的均值和方差，计算如下：
+其中 $\odot$ 表示按位置乘，$\gamma, \beta \in \mathbb{R}^d$ 是缩放参数（scale）和偏移参数（shift），代表着把第 $i$ 个特征的 batch 分布的均值和方差移动到 $\beta^i, \gamma^i$。$\gamma$ 和 $\beta$ 是需要与其他模型参数一起学习的参数。 $\hat{\mu}$ 和 $\hat{\sigma}$ 表示特征向量所有元素的均值和方差，计算如下：
 
 $$
 \hat{\mu} = \frac{1}{d} \sum_{x_i \in \textrm{x}} x_i
@@ -115,7 +155,7 @@ class LlamaRMSNorm(nn.Module):
         super(RMSNorm, self).__init__()
         self.scale = nn.Parameter(torch.ones(dim))  # 可学习的缩放参数
         self.variance_epsilon = eps
-    
+  
     def forward(self, hidden_states):
         # hidden_states 的形状为 [batch_size, seq_len, dim]
         input_dtype = hidden_states.dtype
@@ -139,22 +179,23 @@ output_pytorch = rmsnorm_pytorch(x)
 
 print("输入和输出的形状: ", x.shape, output.shape)
 if torch.allclose(output, output_pytorch, atol=1e-6):
-    print("结果验证通过: 自己实的 RMSNorm 和 pytorch nn.RMSNorm 结果一致！")
+    print("结果验证通过: 自己实现的RMSNorm 和 pytorch nn.RMSNorm 结果一致！")
 else:
-    print("结果验证失败: 自己实的 RMSNorm 和 pytorch nn.RMSNorm 结果不一致。")
+    print("结果验证失败: 自己实现的RMSNorm 和 pytorch nn.RMSNorm 结果不一致。")
 ```
 
 代码运行后输出结果如下所示：
-> 输入和输出的形状:  torch.Size([2, 4, 8]) torch.Size([2, 4, 8])
-结果验证通过: 自己实的 RMSNorm 和 pytorch nn.RMSNorm 结果一致！
 
-### 1.3 FFN_SwiGLU
+> 输入和输出的形状:  torch.Size([2, 4, 8]) torch.Size([2, 4, 8])
+> 结果验证通过: 自己实现的 RMSNorm 和 pytorch nn.RMSNorm 结果一致！
+
+### 1.4 FFN_SwiGLU
 
 #### FFN 发展史
 
 **FFN**: 
 
-`FFN` 层全称是 Position-wise Feed-Forward Networks（`FFN`），`FFN` 接收一个张量 x（序列中特定位置的隐藏表示），并将其通过两个可学习的**线性变换**（由矩阵 W1 和 W2 以及偏置向量 b1 和 b2 表示）进行处理，在两个线性变换之间应用修正线性（`ReLU`）[Glorot et al.,2011](https://proceedings.mlr.press/v15/glorot11a/glorot11a.pdf)激活。FFN 层（去掉了 dropout）结构如下图所示:
+`FFN` 层全称是 Position-wise Feed-Forward Networks（`FFN`），`FFN` 接收一个张量 x（序列中特定位置的隐藏表示），并将其通过两个可学习的**线性变换**（由矩阵 W1 和 W2 以及偏置向量 b1 和 b2 表示）进行处理，在两个线性变换之间应用修正线性（`ReLU`）[Glorot et al.,2011](https://proceedings.mlr.press/v15/glorot11a/glorot11a.pdf)激活。FFN 层结构如下图所示:
 
 <center>
 <img src="../images/llama/ffn.png" width="50%" alt="ffn">
@@ -163,7 +204,7 @@ else:
 `FFN` 计算过程用数学公式可表达为：
 
 $$
-\text{FFN}(x, W_1, W_2, b_1, b_2) = \text{max}(0, xW_1 + b_1 )W_2 + b_2 
+\text{FFN}(x, W_1, W_2, b_1, b_2) = \text{max}(0, xW_1 + b_1 )W_2 + b_2
 $$
 
 在 T5 模型的实现中，使用的是没有偏置 `bias` 的版本，数学公式表达如下:
@@ -183,6 +224,7 @@ $$
 其中激活函数 $\text{Swish}(x) = x⋅ \text{Sigmoid}(\beta x) = \frac{x}{1 + e^{-\beta x}}$，Sigmoid 函数: $\sigma(x) = \frac{1}{1 + e^{-x}}$。
 
 $\beta$ 可以是常数或可训练参数。下图展示了不同 $\beta$ 值下的 Swish 曲线。
+
 1. 如果 $\beta$ = 1，Swish 等价于 Elfwing 等人（2017）为强化学习提出的 Sigmoid 加权线性单元（`SiLU`）。
 2. 当 $\beta = 0$ 时，Swish 变为缩放线性函数 $f(x) = x/2$。
 3. 随着 $\beta$ 趋近于无穷大，sigmoid 分量接近 0-1 函数，因此 Swish 变得与 ReLU 函数相似。这表明 Swish 可以被看作是一个平滑的函数，在线性函数和 ReLU 之间进行非线性插值。如果将 $\beta$ 设置为可训练参数，模型可以调控这种插值的程度。
@@ -221,13 +263,13 @@ $$
 \text{FFN}_{\text{SwiGLU}}(x, W_1, W_3, W_2) = (\text{SiLU}(xW_1)\otimes xW_3)W_2
 $$
 
-$\text{FPN}_{\text{SwiGLU}}$ 层结构如下图所示:
+$\text{FFN}_{\text{SwiGLU}}$ 层结构如下图所示:
 
 <center>
 <img src="../images/llama/ffn_structrue.png" width="50%" alt="ffn_structrue">
 </center>
 
-原始的的 $\text{FPN}$ 层只有两个权重矩阵，但变体 $\text{FPN}_{\text{SwiGLU}}$ **有三个线性层权重矩阵**：$W_1$、$W_3$、$W_2$。为了保持参数数量和计算量的恒定，需要将隐藏单元的数量 `d_ff`（权重矩阵 $W_1$ 和 $W_3$ 的第二个维度以及 $W_2$ 的第一个维度）缩小 `2/3`。
+原始的的 $\text{FFN}$ 层只有两个权重矩阵，但变体 $\text{FFN}_{\text{SwiGLU}}$ **有三个线性层权重矩阵**：$W_1$、$W_3$、$W_2$。为了保持参数数量和计算量的恒定，需要将隐藏单元的数量 `d_ff`（权重矩阵 $W_1$ 和 $W_3$ 的第二个维度以及 $W_2$ 的第一个维度）缩小 `2/3`。
 
 `Pytorch` 实现代码如下所示:
 
@@ -246,18 +288,23 @@ class FFNSwiGLU(nn.Module):
         self.fc1 = nn.Linear(input_dim, hidden_dim, bias=False)
         self.fc2 = nn.Linear(hidden_dim, input_dim, bias=False)
         self.fc3 = nn.Linear(input_dim, hidden_dim, bias=False) 
-        
+  
     def forward(self, x):
         # LLaMA 官方提供的代码是使用 F.silu() 激活函数
+<<<<<<< HEAD:1-transformer_model/llama1-3模型结构详解.md
         return self.fc2(F.silu(self.fc1(x)) * self.fc3(x)))
     
+=======
+        return self.fc2(F.silu(self.fc1(x) * self.fc3(x)))
+  
+>>>>>>> 88fe577 (update llama note):1-transformer_model/llama1-3系列详解.md
 layer = FFNSwiGLU(128, 256)
 x = torch.randn(1, 128)
 out = layer(x)
 print(out.shape) # torch.Size([1, 128])
 ```
 
-### 1.4 RoPE 旋转位置编码
+### 1.5 RoPE 旋转位置编码
 
 之所以必须使用位置编码，是因为纯粹的 Attention 模块是无法捕捉输入顺序的，即无法理解不同位置的 token 代表的意义不同。比如，输入文本为“我爱苹果”或“苹果爱我”，模型会将这两句话视为相同的内容，因为嵌入中并没有明确的顺序信息让模型去学习。
 
@@ -268,6 +315,7 @@ print(out.shape) # torch.Size([1, 128])
 3. 适应不同长度的序列：RoPE 可以灵活处理不同长度的输入序列。
 
 总结**结合 RoPE 的 self-attention 操作的流程**如下：
+
 1. 首先，对于 `token` 序列中的每个词嵌入向量，都计算其对应的 query 和 key 向量;
 2. 然后在得到 query 和 key 向量的基础上，应用公式（7）和（8）对每个 `token` 位置都计算对应的旋转位置编码；
 3. 接着对每个 `token` 位置的 query 和 key 向量的元素按照**两两一组**应用旋转变换；
@@ -277,7 +325,7 @@ print(out.shape) # torch.Size([1, 128])
 
 最后，如果你直接看 `pytorch` 代码，其实很难理解 `rope` 是如何应用相对位置信息的，这个只能通过前面的公式推导才能理解。
 
-结合 llama 官方实现代码，下述是我修改优化和添加注释后的代码，更容易看懂:
+结合 llama 官方实现代码，下述是经过修改优化和添加注释后的代码，更容易看懂:
 
 ```python
 def compute_theta(dim: int, base: float = 10000.0, device: torch.device = torch.device('cpu')) -> torch.Tensor:
@@ -339,7 +387,7 @@ def apply_rotary_emb(xq: torch.Tensor, xk: torch.Tensor, freqs_cis: torch.Tensor
     return xq_out.type_as(xq), xk_out.type_as(xk)
 ```
 
-### 1.5 基于开源 LLaMA 1 微调的模型
+### 1.6 基于开源 LLaMA 1 微调的模型
 
 > 以下这些项目都可以算是 Meta 发布的 LLaMA（驼马）模型的子子孙孙。
 
@@ -355,7 +403,7 @@ def apply_rotary_emb(xq: torch.Tensor, xk: torch.Tensor, freqs_cis: torch.Tensor
 
 **2，Vicuna**
 
-[Vicuna](https://chat.lmsys.org/) 是一款从 LLaMA 模型中对用户分享的对话进行了精细调优的聊天助手，根据的评估，这款聊天助手在 LLaMA 子孙模型中表现最佳，能达到  ChatGPT 90% 的效果。 
+[Vicuna](https://chat.lmsys.org/) 是一款从 LLaMA 模型中对用户分享的对话进行了精细调优的聊天助手，根据评估，这款聊天助手在 LLaMA 子孙模型中表现最佳，能达到  ChatGPT 90% 的效果。
 
 <div align="center">
 <img src="../images/llama/Vicuna-demo.png" width="60%" alt="Vicuna-demo">
@@ -363,7 +411,7 @@ def apply_rotary_emb(xq: torch.Tensor, xk: torch.Tensor, freqs_cis: torch.Tensor
 
 **3，Koala（考拉）**
 
-一款从 `LLaMA` 模型中对用户分享的对话和开源数据集进行了**精细调优**的聊天机器人，其表现与`Vicuna` 类似。 
+一款从 `LLaMA` 模型中对用户分享的对话和开源数据集进行了**精细调优**的聊天机器人，其表现与 `Vicuna` 类似。
 
 - blog: Koala: A Dialogue Model for Academic Research
 - demo: FastChat
@@ -392,13 +440,15 @@ llama2 相比于 llama1 其训练数据提升了 40%，有 7B、13B、34B、70B 
 和 LLaMA1 对比，Tokenizer 配置与 llama1 完全相同，分词使用 sentencePiece 库实现的 `BPE` 算法，vocabulary size 为 32k。
 
 **llama2 模型架构和 llama1 一模一样，但模型推理的 `decode` 阶段的 kv cache 优化上做了改变**。具体来说，在 llama2-34B 和 llama2-70B 参数模型上使用了 `GQA` 优化技术，7B 和 13B 模型依然使用 `MQA`。
+
 > kv cache 内存计算公式为：$\text{memory\_kv-cache} = 2*2*nh*b(s+o) = 4nh*b(s+o)$。
 
-### 2.2 kv cache 优化-GQA 
+### 2.2 kv cache 优化-GQA
 
 `MQA`，全称 Multi Query Attention, `GQA` 由 google 提出的 MQA 变种，全称 Group-Query Attention，都是多头注意力（MHA）的变体，本质上是一种**共用 KV cache 的优化方法**。
 
 kv cache 优化三种方案：`MHA`、 `MQA` 和 `GQA` 的原理及区别如下：
+
 1. 最原始的 MHA(Multi-Head Attention)，QKV 三部分有相同数量的头（head），且一一对应。每次做 Attention，head1 的 QKV 就做好自己运算就可以，最后输出时将各个头的 `self-attention output` 相拼接。
 2. MQA 则是让 Q 仍然保持原来的头数，但 K 和 V 只有一个头，相当于所有的 Q 头共享一个 K 和 V 头，所以叫做 Multi-Query 了。这直接让 KV cache 内存减少了 head_num 倍。
 3. `GQA` 是 `MHA` 和 `MQA` 的折中，将 Q 分成 8 组，每组共享相同的一个 kv 头，假设 Q 有 64 个头，则使用 `GQA` 技术后，kv 头数 = $64/8 = 8$。这直接让 KV cache 内存减少了 8 倍。
@@ -425,7 +475,7 @@ def repeat_kv(x: torch.Tensor, n_rep: int) -> torch.Tensor:
     if n_rep == 1:
         return x
     return (x[:, :, :, None, :].expand(bs, slen, n_kv_heads, n_rep, head_dim).reshape(bs, slen, n_kv_heads * n_rep, head_dim))
-    
+  
 class Attention(nn.Module):
     def __init__(self, args: ModelArgs):
         super().__init__()
@@ -441,10 +491,10 @@ class Attention(nn.Module):
         self.wv = ColumnParallelLinear(args.dim,self.n_kv_heads * self.head_dim,# V的头数* head_dim
                                        ...)
         self.wo = RowParallelLinear(args.n_heads * self.head_dim,args.dim,... )
-​
+
         self.cache_k = torch.zeros((args.max_batch_size,args.max_seq_len,self.n_local_kv_heads, #KV的头数
                 self.head_dim,)).cuda()
-        self.cache_v = torch.zeros((args.max_batch_size,args.max_seq_len,self.n_local_kv_heads,#KV的头数         
+        self.cache_v = torch.zeros((args.max_batch_size,args.max_seq_len,self.n_local_kv_heads,#KV的头数   
                                     self.head_dim,)).cuda()
     def forward(
         self,
@@ -455,11 +505,11 @@ class Attention(nn.Module):
     ):
         bsz, seqlen, _ = x.shape
         xq, xk, xv = self.wq(x), self.wk(x), self.wv(x)
-​
+
         xq = xq.view(bsz, seqlen, self.n_local_heads, self.head_dim)
         xk = xk.view(bsz, seqlen, self.n_local_kv_heads, self.head_dim)
         xv = xv.view(bsz, seqlen, self.n_local_kv_heads, self.head_dim)
-        
+  
         xq, xk = apply_rotary_emb(xq, xk, freqs_cis=freqs_cis) #嵌入RoPE位置编码
         ...
         # 按此时序列的句子长度把kv添加到cache中
@@ -469,11 +519,11 @@ class Attention(nn.Module):
         # 读取新进来的token所计算得到的k和v
         keys = self.cache_k[:bsz, : start_pos + seqlen]
         values = self.cache_v[:bsz, : start_pos + seqlen]
-​
+
         # repeat k/v heads if n_kv_heads < n_heads
         keys = repeat_kv(keys, self.n_rep)  # (bs, seqlen, n_local_heads, head_dim)
         values = repeat_kv(values, self.n_rep)  # (bs, seqlen, n_local_heads, head_dim)
-       
+   
         xq = xq.transpose(1, 2)  # (bs, n_local_heads, seqlen, head_dim)
         keys = keys.transpose(1, 2)
         values = values.transpose(1, 2)
@@ -487,6 +537,7 @@ class Attention(nn.Module):
         output = output.transpose(1, 2).contiguous().view(bsz, seqlen, -1)
         return self.wo(output)
 ```
+
 ## 三 llama3 模型
 
 **和 Llama 2 相比，Llama 3 最大的变化是采用了新的 Tokenizer**，将词汇表大小扩展至 128k（前版本为 32k Token）。
@@ -494,18 +545,21 @@ class Attention(nn.Module):
 ### 3.1 llam3 概述
 
 llama3 技术推理角度的总结：
+
 1. **模型结构**: Llama 3 中依然选择了相对标准的纯解码器 decoder-only transformer 架构，模型结构上和 Llama 2 相比几乎没变化。在 Llama 2 中只有 34B,70B 使用了分组查询注意 (GQA)，为了提高模型的推理效率，**Llama 3 所有模型都采用了 `GQA`**。
-2. **分词器**：和 Llama 2 不同的是，Llama 3 将 tokenizer 由sentencepiece 换成 `tiktoken`, 词汇量从 `32K` 增加到 `128K`，增加了 4 倍。更大的词汇库能够更高效地编码文本，增加编码效率，可以实现更好的下游性能。不过这也会导致**嵌入层**的输入和输出矩阵尺寸增大，模型参数量也会增大。
+2. **分词器**：和 Llama 2 不同的是，Llama 3 将 tokenizer 由sentence piece 换成 `tiktoken`, 词汇量从 `32K` 增加到 `128K`，增加了 4 倍。更大的词汇库能够更高效地编码文本，增加编码效率，可以实现更好的下游性能。不过这也会导致**嵌入层**的输入和输出矩阵尺寸增大，模型参数量也会增大。
 3. **序列长度**：在长度为 `8,192` 的 token 序列上训练（之前是 4K），即模型输入上下文长度从 `4096`（Llama 2）和 `2048`（Llama 1）增加到 `8192`（8k），但相对于 GPT-4 的 128K 来说还是相当小。
 
 ### 3.2 llam3.1 概述
 
 首次发布了 `405B` 模型，和当下最强的 GPT-4 / Claude 3.5 旗鼓相当。全新升级了 Llama-3 的 8B 和 70B 版本，升级版不仅支持多语言功能，而且**其上下文长度延展到了 128K**，具有最先进的工具使用能力，推理能力也显著提升。
+
 > llam3.1 系列模型于 2024 年 7 月发布，有 3 个可用版本：8B、70B、405B。
 
 ### 3.3 llam3.2 概述
 
 2024 年 9 月又发布了 Llama 3.2，包括小型和中型视觉语言模型（11B 和 90B），以及轻量级的文本模型（1B 和 3B），这些模型可以在边缘设备和移动设备上运行，同时提供预训练和指令调优的版本。
+
 1. **Llama 3.2 中的 1B 和 3B 模型支持 128K tokens 的上下文长度**，并且是同类中性能领先的，用于设备端的摘要生成、指令执行和文本重写任务。这些模型在发布时就已适配 Qualcomm 和 MediaTek 的硬件，并针对 Arm 处理器进行了优化。
 2. 在视觉任务上，Llama 3.2 的 11B 和 90B 模型在图像理解方面优于封闭模型如 Claude 3 Haiku，可以直接作为对应文本模型的替代品。这些模型既有预训练版本，也有对齐版本，可以使用 torchtune 微调，并通过 torchchat 部署到本地。此外，用户还可以通过我们的智能助手 Meta AI 直接试用这些模型。
 3. 首次发布了 Llama Stack 分发版本，这将大大简化开发者在不同环境中使用 Llama 模型的流程，包括单节点部署、本地部署、云端部署，以及设备端部署，从而实现 RAG（检索增强生成）和工具集成应用的快速部署。
@@ -521,16 +575,3 @@ llama3 技术推理角度的总结：
 在**后训练阶段**（post-training），我们沿用了 Llama 3.1 的训练方案，通过多轮的对齐步骤生成最终的聊天模型。每一轮的对齐包括监督微调（SFT）、拒绝采样（RS）和直接偏好优化（DPO）。在这个阶段，我们将模型的上下文长度扩展到了 128K tokens，同时确保模型的质量与预训练模型保持一致。此外，我们还使用合成数据进行训练，经过严格的数据处理和筛选，以确保数据质量。我们通过精心组合这些数据，优化了模型在摘要生成、文本重写、指令执行、语言推理以及工具使用等方面的能力。
 
 Llama 3.2 发布的模型权重采用 `BFloat16` 数字格式。
-
-## 参考资料
-
-1. [Hendrycks and Gimpel, 2016](https://arxiv.org/pdf/1606.08415.pdf) 
-2. [GLU Variants Improve Transformer](https://arxiv.org/pdf/2002.05202.pdf)
-3. [llama2介绍(模型结构+参数计算)](https://zhuanlan.zhihu.com/p/647862867)
-4. [知乎-Llama 2详解](https://zhuanlan.zhihu.com/p/649756898)
-5. [详解三种常用标准化 Batch Norm & Layer Norm & RMSNorm](https://blog.csdn.net/wxc971231/article/details/139925707)
-6. [open-llm-components](https://github.com/jeff52415/open-llm-components/tree/main)
-7. [Build Your Own Llama 3 Architecture from Scratch Using PyTorch](https://pub.towardsai.net/build-your-own-llama-3-architecture-from-scratch-using-pytorch-2ce1ecaa901c)
-8. [LLaMA: Open and Efficient Foundation Language Models](https://arxiv.org/pdf/2302.13971)
-9. [Llama 2: Open Foundation and Fine-Tuned Chat Models](https://arxiv.org/pdf/2307.09288)
-10. https://github.com/meta-llama/llama/blob/main/llama/model.py
