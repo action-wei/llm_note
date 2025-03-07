@@ -193,7 +193,7 @@ else:
 
 #### FFN 发展史
 
-**FFN**: 
+**FFN**:
 
 `FFN` 层全称是 Position-wise Feed-Forward Networks（`FFN`），`FFN` 接收一个张量 x（序列中特定位置的隐藏表示），并将其通过两个可学习的**线性变换**（由矩阵 W1 和 W2 以及偏置向量 b1 和 b2 表示）进行处理，在两个线性变换之间应用修正线性（`ReLU`）[Glorot et al.,2011](https://proceedings.mlr.press/v15/glorot11a/glorot11a.pdf)激活。FFN 层结构如下图所示:
 
@@ -275,7 +275,6 @@ $\text{FFN}_{\text{SwiGLU}}$ 层结构如下图所示:
 
 ```python
 # -*- coding  : utf-8 -*-
-# Author: honggao.zhang
 
 import torch
 import torch.nn as nn
@@ -287,17 +286,12 @@ class FFNSwiGLU(nn.Module):
         hidden_dim = int(2 * hidden_dim / 3)
         self.fc1 = nn.Linear(input_dim, hidden_dim, bias=False)
         self.fc2 = nn.Linear(hidden_dim, input_dim, bias=False)
-        self.fc3 = nn.Linear(input_dim, hidden_dim, bias=False) 
-  
+        self.fc3 = nn.Linear(input_dim, hidden_dim, bias=False)
+
     def forward(self, x):
         # LLaMA 官方提供的代码是使用 F.silu() 激活函数
-<<<<<<< HEAD:1-transformer_model/llama1-3模型结构详解.md
-        return self.fc2(F.silu(self.fc1(x)) * self.fc3(x)))
-    
-=======
-        return self.fc2(F.silu(self.fc1(x) * self.fc3(x)))
-  
->>>>>>> 88fe577 (update llama note):1-transformer_model/llama1-3系列详解.md
+        return self.fc2(F.silu(self.fc1(x)) * self.fc3(x))
+
 layer = FFNSwiGLU(128, 256)
 x = torch.randn(1, 128)
 out = layer(x)
