@@ -5,7 +5,6 @@ date: 2024-10-20 20:00:00
 summary: transformer 模型结构代码如何实现，模型结构分析。
 categories: Transformer
 ---
-
 - [前言](#前言)
   - [Transformer 简要发展史](#transformer-简要发展史)
   - [Transformer 整体架构](#transformer-整体架构)
@@ -124,9 +123,12 @@ LLM 中，单词 token 需要经过 Embedding 层，`Embedding` 层的作用是�
 
 假设输入 token 序列的维度是 `[batch_size, seq_len, vocab_size]`（后续都统一把输入维度写前，输出维度写后），经过词嵌入层后的输出维度是 `[batch_size, seq_len, d_model]`。对应的词嵌入层权重矩阵的大小为：`[vocab_size, d_model]`，即**词嵌入层的参数量为**：
 
-$$\text{param}_\text{TE} = \text{vocab\_size} \times \text{d}_\text{model}$$
+$$
+\text{param}_\text{TE} = \text{vocab\_size} \times \text{d}_\text{model}
+$$
 
 词 Embedding 层通常使用 `nn.Embedding` 实现。`nn.Embedding` 的输入输出形式:
+
 - 输入：一个整数张量，表示词表索引（即每个 token 在词表中的位置）。输入形状: `(batch_size, sequence_length)`，其中 batch_size 表示批次中的样本数，sequence_length 表示每个输入序列的长度。
 - 输出：每个词对应的嵌入向量，维度是可配置的（比如 100 维或 300 维）。输出的形状:`(batch_size, sequence_length, embedding_dim)`。`embedding_dim` 隐藏层大小，也是 $d_{model}$ 或者 $h$，
 
@@ -156,6 +158,7 @@ print("嵌入向量的形状：", embedded_output.shape)  # (batch_size, sequenc
 # 5. 打印嵌入向量
 print(embedded_output)
 ```
+
 程序运行后输出结果如下所示:
 
 <img src="../images/transformer_code/embedding_layer_code.png" width="60%" alt="embedding 层输出结果示例">
@@ -173,7 +176,23 @@ $$
 
 其中，`pos` 表示单词在句子中的位置，$d$ 表示 PE 的维度 (与词 Embedding 一样)，$2i$ 表示偶数的维度，$2i+1$ 表示奇数维度 (即 $2i≤d, 2i+1≤d$)。
 
-#### 1.2.3 TransformerEmbedding 层实现
+【总结】
+
+**使用三角函数来生成位置信息的优点：**
+
+- 捕获相对位置信息
+三角函数的加法公式使得模型能够隐式地捕捉相对位置关系。对于任意偏移量k，存在线性变换M_k，使得PE(pos + k) = PE(pos) · M_k。这意味着模型可以通过学习M_k，将一个位置的编码转换为另一个位置的编码，而无需显式地编码位置差。
+
+- 外推能力
+正弦和余弦函数是周期性函数，这使得位置编码能够处理任意长度的序列，即使序列长度远超训练时的最大长度。
+
+- 数值范围可控
+位置编码的幅值与词嵌入相似（如均值为0、方差为1），避免位置信息主导语义信息
+
+- 正交性
+在偶数和奇数维度上交替使用正弦和余弦函数，使得位置编码向量的每个维度保持一定的正交性。这种正交性有助于模型更清晰地区分和学习来自不同位置的特征。
+
+#### 1.2.3 Transformer Embedding 层实现
 
 总结：transformer 输入模块有三个组成部分：文本/提示词、分词器（Tokenizer）和嵌入层（Embeddings）。输入模块的工作流程和代码实现如下所示:
 
@@ -221,7 +240,7 @@ class PositionalEncoding(nn.Module):
 
         return self.encoding[:seq_len, :]
         # [seq_len = 30, d_model = 512]
-        # it will add with tok_emb : [128, 30, 512]         
+        # it will add with tok_emb : [128, 30, 512]       
 
 class TokenEmbedding(nn.Embedding):
     """
@@ -284,9 +303,11 @@ Encoder 和 Decoder 结构中公共的 `layer` 之一是 `Multi-Head Attention`�
 > Embedding Vector 的大小是我们可以设置的超参数—基本上它就是我们训练数据集中最长句子的长度。
 
 Self-Attention  层的计算过程用数学公式可表达为:
+
 $$
 \text{Attention}(Q, K, V) = \text{softmax} (\frac{QK^T}{\sqrt{d_k}})V \nonumber
 $$
+
 以下是一个示例代码，它创建了一个 ScaleDotProductAttention 层，并将 Q、K、V 三个张量传递给它进行计算：
 
 ```python
@@ -345,15 +366,17 @@ Multi-Head Attention (`MHA`) 是基于 Self-Attention (`SA`) 的一种变体。M
 3. 每个子张量并行**计算注意力分数**，即执行 dot-product attention 层，输出张量尺寸为 [batch_size, n_head, seq_len, d_model//n_head]；
 4. 将这些子张量进行拼接 `concat` ，并经过线性变换得到最终的输出张量，尺寸为 [batch_size, seq_len, d_model]。
 
-总结：因为 `GPU` 的并行计算特性，步骤2中的**张量拆分**和步骤 4 中的**张量拼接**，其实都是通过 `review` 算子来实现的。同时，也能发现`SA` 和 `MHA` 模块的输入输出矩阵维度都是一样的。
+总结：因为 `GPU` 的并行计算特性，步骤2中的**张量拆分**和步骤 4 中的**张量拼接**，其实都是通过 `review` 算子来实现的。同时，也能发现 `SA` 和 `MHA` 模块的输入输出矩阵维度都是一样的。
 
 ### 2.4 Multi-Head Attention 实现
 
 Multi-Head Attention 层的输入同样也是三个张量：**查询（Query）、键（Key）和值（Value）**，其计算过程用数学公式可表达为:
+
 $$
 \text{MultiHead(Q, K, V )} = \text{Concat}(\text{head}_{1}, ..., \text{head}_{\text{h}})W^O \\
  \text{where head}_{\text{i}} = \text{Attention}(QW_i^Q , KW_i^K , VW_i^V )
 $$
+
 一般用 `d_model` 表示输入**嵌入向量**的维度， `n_head` 表示分割成多少个头，因此，`d_model//n_head` 自然表示每个头的输入和输出维度，在论文中 d_model = 512，n_head = 8，d_model//n_head = 64。值得注意的是，由于每个头的维数减少，总计算成本与具有全维的单头注意力是相似的。
 
 Multi-Head Attention 层的 `Pytorch` 实现代码如下所示：
@@ -373,7 +396,7 @@ class MultiHeadAttention(nn.Module):
         self.w_k = nn.Linear(d_model, d_model)  # K 线性变换层
         self.w_v = nn.Linear(d_model, d_model)  # V 线性变换层
         self.fc = nn.Linear(d_model, d_model)   # 输出线性变换层
-        
+      
     def forward(self, q, k, v, mask=None):
         # 1. dot product with weight matrices
         q, k, v = self.w_q(q), self.w_k(k), self.w_v(v) # size is [batch_size, seq_len, d_model]
@@ -384,30 +407,30 @@ class MultiHeadAttention(nn.Module):
         # 4, concat attention and linear transformation
         concat_tensor = self.concat(sa_output)
         mha_output = self.fc(concat_tensor)
-        
+      
         return mha_output
-    
+  
     def split(self, tensor):
         """
         split tensor by number of head(n_head)
 
         :param tensor: [batch_size, seq_len, d_model]
         :return: [batch_size, n_head, seq_len, d_model//n_head], 输出矩阵是四维的，第二个维度是 head 维度
-        
+      
         # 将 Q、K、V 通过 reshape 函数拆分为 n_head 个头
         batch_size, seq_len, _ = q.shape
         q = q.reshape(batch_size, seq_len, n_head, d_model // n_head)
         k = k.reshape(batch_size, seq_len, n_head, d_model // n_head)
         v = v.reshape(batch_size, seq_len, n_head, d_model // n_head)
         """
-        
+      
         batch_size, seq_len, d_model = tensor.size()
         d_tensor = d_model // self.n_head
         split_tensor = tensor.view(batch_size, seq_len, self.n_head, d_tensor).transpose(1, 2)
         # it is similar with group convolution (split by number of heads)
-        
+      
         return split_tensor
-    
+  
     def concat(self, sa_output):
         """ merge multiple heads back together
 
@@ -418,7 +441,7 @@ class MultiHeadAttention(nn.Module):
         batch_size, n_head, seq_len, d_tensor = sa_output.size()
         d_model = n_head * d_tensor
         concat_tensor = sa_output.transpose(1, 2).contiguous().view(batch_size, seq_len, d_model)
-        
+      
         return concat_tensor
 ```
 
@@ -433,9 +456,11 @@ Encoder 结构由 $\text{N} = 6$ 个相同的 encoder block 堆叠而成，每�
 ### 3.1 Add & Norm
 
 `Add & Norm` 层由 Add 和 Norm 两部分组成。这里的 Add 指 X + MultiHeadAttention(X)，是一种残差连接。Norm 是 Layer Normalization。Add & Norm 层计算过程用数学公式可表达为:
+
 $$
 \text{Layer Norm}(X + \text{MultiHeadAttention}(X)) \nonumber
 $$
+
 Add 比较简单，这里重点讲下 Layer Norm 层。Layer Norm 是一种常用的神经网络归一化技术，可以使得模型训练更加稳定，收敛更快。它的主要作用是对每个样本**在特征维度上进行归一化**，减少了不同特征之间的依赖关系，提高了模型的泛化能力。Layer Norm 层的计算可视化如下图所示:
 
 <div align="center">
@@ -451,14 +476,14 @@ class LayerNorm(nn.Module):
         self.gamma = nn.Parameter(torch.ones(d_model))
         self.beta = nn.Parameter(torch.zeros(d_model))
         self.eps = eps
-    
+  
     def forward(self, x):
         mean = x.mean(-1, keepdim=True) # '-1' means last dimension. 
         var = x.var(-1, keepdim=True)
-        
+      
         out = (x - mean) / torch.sqrt(var + self.eps)
         out = self.gamma * out + self.beta
-        
+      
         return out
 
 # NLP Example
@@ -482,9 +507,11 @@ print(torch.allclose(pytorch_ln_out, my_ln_out, rtol=0.1,atol=0.01))  # 输出 T
 <img src="../images/transformer_code/fpn.png" alt="fpn" style="zoom:50%;" />
 
 Feed Forward 层全称是 Position-wise Feed-Forward Networks，其本质是一个**两层的全连接层**，第一层的激活函数为 Relu，第二层不使用激活函数，计算过程用数学公式可表达为：
+
 $$
 \text{FFN}(X) = \text{max}(0, XW_1 + b_1 )W_2 + b_2 \nonumber
 $$
+
 除了使用两个全连接层来完成线性变换，另外一种方式是使用 kernal_size = 1 的两个 $1\times 1$ 卷积层，输入输出维度不变，都是 512，中间维度是 2048。
 
 PositionwiseFeedForward 层的 Pytorch 实现代码如下所示:
@@ -497,13 +524,13 @@ class PositionwiseFeedForward(nn.Module):
         self.fc2 = nn.Linear(d_diff, d_model)
         self.relu = nn.ReLU()
         self.dropout = nn.Dropout(drop_prob)
-    
+  
     def forward(self, x):
         x = self.fc1(x)
         x = self.relu(x)
         x = self.dropout(x)
         x = self.fc2(x)
-        
+      
         return x
 ```
 
@@ -525,23 +552,23 @@ class EncoderLayer(nn.Module):
         self.ln2 = LayerNorm(d_model)
         self.dropout1 = nn.Dropout(drop_prob)
         self.dropout2 = nn.Dropout(drop_prob)
-    
+  
     def forward(self, x, mask=None):
         x_residual1 = x
-        
+      
         # 1, compute multi-head attention
         x = self.mha(q=x, k=x, v=x, mask=mask)
-        
+      
         # 2, add residual connection and apply layer norm
         x = self.ln1( x_residual1 + self.dropout1(x) )
         x_residual2 = x
-        
+      
         # 3, compute position-wise feed forward
         x = self.ffn(x)
-        
+      
         # 4, add residual connection and apply layer norm
         x = self.ln2( x_residual2 + self.dropout2(x) )
-        
+      
         return x
 
 class Encoder(nn.Module):
@@ -554,11 +581,11 @@ class Encoder(nn.Module):
                                         device=device)
         self.layers = nn.ModuleList([EncoderLayer(d_model, ffn_hidden, n_head, drop_prob) 
                                      for _ in range(n_layers)])
-    
+  
     def forward(self, x, mask=None):
-        
+      
         x = self.emb(x)
-        
+      
         for layer in self.layers:
             x = layer(x, mask)
         return x
@@ -588,40 +615,40 @@ class DecoderLayer(nn.Module):
         self.mha1 = MultiHeadAttention(d_model, n_head)
         self.ln1 = LayerNorm(d_model)
         self.dropout1 = nn.Dropout(p=drop_prob)
-        
+      
         self.mha2 = MultiHeadAttention(d_model, n_head)
         self.ln2 = LayerNorm(d_model)
         self.dropout2 = nn.Dropout(p=drop_prob)
-        
+      
         self.ffn = PositionwiseFeedForward(d_model, ffn_hidden)
         self.ln3 = LayerNorm(d_model)
         self.dropout3 = nn.Dropout(p=drop_prob)
-    
+  
     def forward(self, dec_out, enc_out, trg_mask, src_mask):
         x_residual1 = dec_out
-        
+      
         # 1, compute multi-head attention
         x = self.mha1(q=dec_out, k=dec_out, v=dec_out, mask=trg_mask)
-        
+      
         # 2, add residual connection and apply layer norm
         x = self.ln1( x_residual1 + self.dropout1(x) )
-        
+      
         if enc_out is not None:
             # 3, compute encoder - decoder attention
             x_residual2 = x
             x = self.mha2(q=x, k=enc_out, v=enc_out, mask=src_mask)
-    
+  
             # 4, add residual connection and apply layer norm
             x = self.ln2( x_residual2 + self.dropout2(x) )
-        
+      
         # 5. positionwise feed forward network
         x_residual3 = x
         x = self.ffn(x)
         # 6, add residual connection and apply layer norm
         x = self.ln3( x_residual3 + self.dropout3(x) )
-        
+      
         return x
-    
+  
 class Decoder(nn.Module):
     def __init__(self, dec_voc_size, max_len, d_model, ffn_hidden, n_head, n_layers, drop_prob, device):
         super().__init__()
@@ -653,6 +680,7 @@ class Decoder(nn.Module):
 ## 五 Transformer 实现
 
 Transformer 模型特性：
+
 - Transformer 与 RNN 不同，可以比较好地并行训练。
 - Transformer 本身是不能利用单词的顺序信息的，因此需要在输入中添加位置 Embedding，否则 Transformer 就是一个词袋模型了。
 - Transformer 的重点是 Self-Attention 结构，其中用到的 **Q, K, V**矩阵通过输出进行线性变换得到。
