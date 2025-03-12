@@ -15,7 +15,7 @@
 
 `CNN`  的的卷积核窗口大小有限，每次只能看比较短的部分序列，但是它的多通道机制被认为可以去识别多模式，`transformer` 论文参考这个机制，在 `attention` 的机制进一步引出了 `Muti-Head Attention`，来模拟卷积层的多输出通道效果。
 
-`Self-attention` 在 `transformer` 论文之前已经有人提出，但 `transformer` 是第一个只依赖自注意力机制(self-attnetion)来实现 `encoder-decoder` 架构的模型。 
+`Self-attention` 在 `transformer` 论文之前已经有人提出，但 `transformer` 是第一个只依赖自注意力机制(self-attnetion)来实现 `encoder-decoder` 架构的模型。
 
 ### 2. 模型架构
 
@@ -50,7 +50,7 @@ Layer Norm 层的计算可视化如下图所示:
 
 `Decoder` 同样由 $N = 6$ 个相同的层组成。`Decoder` 的 `attention` 是带掩码的，确保位置 $i$ 的预测只能依赖于小于 $i$ 的已知输出。
 
-### 5. 从 attention 到 Scaled Dot-Product Attention 
+### 5. 从 attention 到 Scaled Dot-Product Attention
 
 标准自注意力的数学表达式如下：
 
@@ -58,30 +58,39 @@ $$
 \text{Attention}(Q, K, V) = \text{softmax}\left(\frac{QK^T}{\sqrt{d_k}}\right)V
 $$
 
-1，首先，注意力函数可以描述为将一个查询（query）和一组键-值对（key-value pairs）映射到一个输出 output，$q$、$k$、$v$ 都是向量。输出都是对 `value` 进行加权求和得到的，每个 value 对应的权重 `weight` 是通过 $q$ 和 $k$ 之间的相似度计算得到。
+(1) 首先，注意力函数可以描述为将一个查询（query）和一组键-值对（key-value pairs）映射到一个输出 output，$q$、$k$、$v$ 都是向量。输出都是对 `value` 进行加权求和得到的，每个 value 对应的权重 `weight` 是通过 $q$ 和 $k$ 之间的相似度计算得到。
 
-2，将 q 和 k 的内积作为相似度（Dot-Product），然后除以向量的长度 $\sqrt{d_k}$（Scaled），结果再应用**逐行做 `softmax` 函数**，就会得到 $n$ 个非负且相加求和等于 $1$ 的权重向量，最后将权重应用于 value，就得到了最终输出 output。
+(2) 将 q 和 k 的内积作为相似度（Dot-Product），然后除以向量的长度 $\sqrt{d_k}$（Scaled），结果再应用**逐行做 `softmax` 函数**，就会得到 $n$ 个非负且相加求和等于 $1$ 的权重向量，最后将权重应用于 value，就得到了最终输出 output。
 
 **余弦相似度常用来比较两个向量的相似度（距离）**，伪代码如下：
 
-```bash
+$$
 CosineSimilarity = sum(x[i]*y[i])/(sqrt(sum(x[i]*x[i]))*sqrt(sum(y[i]*y[i])))。
-```
+$$
 
 实际中，为了方便计算，会同时对一组查询（queries）计算注意力函数，将 q、k、v 都是构建成矩阵 $Q$、$K$、$V$（ 维度相等），涉及到两个矩阵乘法。
 
-3，transformer 论文中注意力机制和之前的点积注意力机制不同之处是引入了除以 $\sqrt{d_k}$ 做 scale，并使用 qk^t 点积，因为矩阵乘法更高效。
+(3) transformer 论文中注意力机制和之前的点积注意力机制不同之处是引入了除以 $\sqrt{d_k}$ 做 scale，并使用 qk^t 点积，因为矩阵乘法更高效。
 
-**1，为什么需要做 `scale`：**
-- 引入温度调节（`scale`）：在 softmax 前对 qk^t 的结果矩阵**除以一个系数**，系数大于 1 时可以**使得 softmax 输出的概率分布变得平滑，而不是接近一个 `one hot` 分布**（当向量长度较大时，token 之间相似度很大，进而 softmax 结果较大的会接近 1，较小的接近于 0），从而造成梯度消失问题。有实验证明如果不 scale，模型预训练很难收敛。
+**1.为什么需要做 `scale`：**
 
-**2，为什么设置 $\text{scale} = \sqrt{d_k}$：**
+引入温度调节（`scale`）：在 softmax 前对 qk^t 的结果矩阵**除以一个系数**，系数大于 1 时可以**使得 softmax 输出的概率分布变得平滑，而不是接近一个 `one hot` 分布**（当向量长度较大时，token 之间相似度很大，进而 softmax 结果较大的会接近 1，较小的接近于 0），从而造成梯度消失问题。有实验证明如果不 scale，模型预训练很难收敛。
 
-- 线性变换后的 Q 和 K 已经标准化（均值接近 0，方差接近 1），$qk^t \in \mathbb{R}^{n\times \sqrt{d_k}}$，经过 $qk^t$ 点积后的矩阵每一行均值为 0，方差为 $d_k$，因此需要除以标准差 $\sqrt{d_k}$ 以达到输出归一化的效果。
+**2.为什么设置 $\text{scale} = \sqrt{d_k}$：**
+
+线性变换后的 Q 和 K 已经标准化（均值接近 0，方差接近 1），$qk^t \in \mathbb{R}^{n\times \sqrt{d_k}}$，经过 $qk^t$ 点积后的矩阵每一行均值为 0，方差为 $d_k$，因此需要除以标准差 $\sqrt{d_k}$ 以达到输出归一化的效果。
+
+这里的归一化使用的是Z-Score 标准化方式，Z-Score的目标是将数据转换为标准正态分布，即均值为 0、方差为 1。公式如下：
+
+$$
+normalized\_value = \frac{x-\mu}{\sigma}
+$$
+
+其中，$\mu$ 是数据的均值，$\sigma$ 是数据的标准差。
 
 > 作者提出的注意力机制算法跟之前的 Dot-Product Attention 相比就是单纯多了 Scaled（除以 $\sqrt{d_k}$）。
 
-另外 decoder 模块的 attention  多了一个 `Mask`，实际是第 $t$ 时刻的 $q$ 只能看前面阶段的对应的 $(k, v)$ 对，计算当中表现就是对于 $q_t$ 和 $k_t$ 及其之后的那些权重值都替换成一个极大的负数，这样经过 `softmax` 后（做指数 $e^{w_t}$），对应位置的 $v$ 就变成了 0。 
+另外 decoder 模块的 attention  多了一个 `Mask`，实际是第 $t$ 时刻的 $q$ 只能看前面阶段的对应的 $(k, v)$ 对，计算当中表现就是对于 $q_t$ 和 $k_t$ 及其之后的那些权重值都替换成一个极大的负数，这样经过 `softmax` 后（做指数 $e^{w_t}$），对应位置的 $v$ 就变成了 0。
 
 ### 6. Multi-Head Attention
 
@@ -97,6 +106,7 @@ $$
 $Q$、$K$ 的线性(映射)层的权重维度是 $[d_\text{model}, d_k]$，$V$ 的线性(映射)层的权重维度是 $[d_{model}, d_v]$，输出线性(映射)层权重维度是 $[h*d_v, d_{model}]$。
 
 **多头的作用**：
+
 - **多头注意力机制可以注意到不同子空间的信息，捕捉到更加丰富的特征信息，实现类似卷积核的多通道机制的效果**（论文的解释）。
 - 多头的核心思想就是 `ensemble`（集成），每个 head 类似一个弱分类器，多个 head 的结果做 concat，可以让最后得到的 embedding 向量关注多方面的特征信息，而不会过拟合到某一种 `pattern` 上。
 - 另外，多头注意力在计算上也更方便做并行计算加速；**每个头的 Q、K、V 矩阵计算相互独立，无数据依赖，天然支持并行**。
@@ -109,11 +119,13 @@ $Q$、$K$ 的线性(映射)层的权重维度是 $[d_\text{model}, d_k]$，$V$ �
 <img src="../images/transformer_paper/multi-head-attention.png" width="60%" alt="三个 multi-head attention">
 
 **原理**：
+
 1. 解码器中的第二个注意力层，其查询 $q$ 来自前一层的解码器层，但 $k$、$v$ 来自于编码器最后一层的输出。
 2. 编码器第一个注意力层：不考虑多头和线性投影层的情况，三个输入 $q$ $k$ $v$ 本质上都是一个东西，三个输入都是原始输入本身自己，输出就是输入本身的加权和，而权重又来源自己本身跟跟各个向量的相似度函数，所以也叫自注意力层（self-attention）。
 3. 解码器的第一个注意力层：编码器的最终输出作为 key value 输入进来，解码器下一层的输出作为 query 输入进来。
 
 **作用**：
+
 1. `Self-Attention` (自注意力)：对于每个位置上的 token，Self-Attention 将其与序列中的所有其他位置进行关联，从而使模型能捕捉到句子内部的语义关系。
 2. `Encoder-Decoder Attention` (编码器-解码器注意力)：允许解码器在生成下一个词时参考编码器的输出。这种机制实现了输入和输出序列之间的联系，是实现翻译等任务的关键所在。
 3. `Masked Self-Attention` (掩码自注意力)：过掩码机制屏蔽掉序列中未来位置的 tokens，从而确保模型预测生成的每个 token 仅依赖于当前生成位置之前的 tokens。
