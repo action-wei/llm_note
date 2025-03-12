@@ -176,21 +176,17 @@ $$
 
 其中，`pos` 表示单词在句子中的位置，$d$ 表示 PE 的维度 (与词 Embedding 一样)，$2i$ 表示偶数的维度，$2i+1$ 表示奇数维度 (即 $2i≤d, 2i+1≤d$)。
 
-【总结】
 
 **使用三角函数来生成位置信息的优点：**
 
 - 捕获相对位置信息
-三角函数的加法公式使得模型能够隐式地捕捉相对位置关系。对于任意偏移量k，存在线性变换M_k，使得PE(pos + k) = PE(pos) · M_k。这意味着模型可以通过学习M_k，将一个位置的编码转换为另一个位置的编码，而无需显式地编码位置差。
-
+  三角函数的加法公式使得模型能够隐式地捕捉相对位置关系。对于任意偏移量k，存在线性变换M_k，使得PE(pos + k) = PE(pos) · M_k。这意味着模型可以通过学习M_k，将一个位置的编码转换为另一个位置的编码，而无需显式地编码位置差。
 - 外推能力
-正弦和余弦函数是周期性函数，这使得位置编码能够处理任意长度的序列，即使序列长度远超训练时的最大长度。
-
+  正弦和余弦函数是周期性函数，这使得位置编码能够处理任意长度的序列，即使序列长度远超训练时的最大长度。
 - 数值范围可控
-位置编码的幅值与词嵌入相似（如均值为0、方差为1），避免位置信息主导语义信息
-
+  位置编码的幅值与词嵌入相似（如均值为0、方差为1），避免位置信息主导语义信息。
 - 正交性
-在偶数和奇数维度上交替使用正弦和余弦函数，使得位置编码向量的每个维度保持一定的正交性。这种正交性有助于模型更清晰地区分和学习来自不同位置的特征。
+  在偶数和奇数维度上交替使用正弦和余弦函数，使得位置编码向量的每个维度保持一定的正交性。这种正交性有助于模型更清晰地区分和学习来自不同位置的特征。
 
 #### 1.2.3 Transformer Embedding 层实现
 
@@ -240,7 +236,7 @@ class PositionalEncoding(nn.Module):
 
         return self.encoding[:seq_len, :]
         # [seq_len = 30, d_model = 512]
-        # it will add with tok_emb : [128, 30, 512]       
+        # it will add with tok_emb : [128, 30, 512]   
 
 class TokenEmbedding(nn.Embedding):
     """
@@ -307,6 +303,67 @@ Self-Attention  层的计算过程用数学公式可表达为:
 $$
 \text{Attention}(Q, K, V) = \text{softmax} (\frac{QK^T}{\sqrt{d_k}})V \nonumber
 $$
+
+
+**常见的向量相似度度量方法**
+
+> 向量点乘（内积）
+
+物理含义：点乘的结果可以解释为一个向量在另一个向量方向上的投影长度乘以另一个向量的模。
+
+计算公式：
+$$
+    a ⋅ b = | a | | b | cosθ
+$$
+其中，$| a |$ 和 $| b |$ 分别是向量 a 和 b 的模（长度），θ 是向量 a 和 b 之间的夹角。
+
+点乘结果的大小与两个向量之间的夹角有关。夹角越小（越接近0°），cosθ 越接近1，点乘结果越大；夹角越大（越接近180°），cosθ 越接近-1，点乘结果越小（负值）。当夹角为90°时，点乘结果为0，表示两个向量完全无关（正交）。因此，点乘结果的大小可以反映两个向量在方向上的相似程度，从而衡量它们的“相关性”。
+
+> 1.余弦相似度（Cosine Similarity）
+
+余弦相似度通过计算两个向量之间的夹角余弦值来衡量它们的方向相似性。它不受向量长度的影响，只关注方向。余弦相似度的取值范围为 [-1, 1]，值越接近1表示越相似，越接近-1表示越不相似。
+计算公式：
+$$
+    Cosine Similarity = \frac{A\cdot B}{\|A\|\|B\|}
+$$
+其中，${{A}\cdot{B}}$ 是向量的点积，${\|A\|} 和 {\|B\|}$ 是向量的模长。
+
+> 2.欧式距离（Euclidean Distance）
+
+欧氏距离用于衡量两个向量在多维空间中的直线距离。它是最直观的距离度量方法，适用于连续特征的相似性比较。
+计算公式：
+$$
+    d(A,B) = \sqrt{\sum_{i=1}^{n}{(A_i-B_i)^2}}
+$$
+欧氏距离越小，表示两个向量越相似。
+
+> 3.曼哈顿距离（Manhattan Distance）
+
+曼哈顿距离也称为L1距离或城市街区距离，用于计算两个向量在各坐标轴上的绝对差值之和。它适用于离散特征的相似性比较。
+计算公式：
+$$
+    d(A,B) = \sum_{i=1}^{n}{|A_i-B_i|}
+$$
+
+曼哈顿距离越小，表示两个向量越相似。
+
+> 4.杰卡德相似系数（Jaccard Similarity Coefficient）
+
+杰卡德相似系数用于度量两个集合的相似性，也可应用于向量，通过计算两个向量中相同元素的比例来评估相似度。
+计算公式：
+$$
+    J(A,B) = \frac{|A\cap B|}{|A\cup B|}
+$$
+其中，其中，$|A\cap B∣$ 是两个向量共有的非零元素数量，$∣A\cup B∣$ 是两个向量的非零元素总数。
+
+> 5.汉明距离（Hamming Distance）
+
+汉明距离用于衡量两个字符串或向量中不同字符（或元素）的数量，适用于离散特征的相似性度量。
+
+> 6.皮尔逊相关系数（Pearson Correlation Coefficient）
+
+皮尔逊相关系数用于衡量两个向量之间的线性相关性，取值范围为 [-1, 1]，值越接近1或-1表示相关性越强。
+
 
 以下是一个示例代码，它创建了一个 ScaleDotProductAttention 层，并将 Q、K、V 三个张量传递给它进行计算：
 
@@ -396,7 +453,7 @@ class MultiHeadAttention(nn.Module):
         self.w_k = nn.Linear(d_model, d_model)  # K 线性变换层
         self.w_v = nn.Linear(d_model, d_model)  # V 线性变换层
         self.fc = nn.Linear(d_model, d_model)   # 输出线性变换层
-      
+  
     def forward(self, q, k, v, mask=None):
         # 1. dot product with weight matrices
         q, k, v = self.w_q(q), self.w_k(k), self.w_v(v) # size is [batch_size, seq_len, d_model]
@@ -407,7 +464,7 @@ class MultiHeadAttention(nn.Module):
         # 4, concat attention and linear transformation
         concat_tensor = self.concat(sa_output)
         mha_output = self.fc(concat_tensor)
-      
+  
         return mha_output
   
     def split(self, tensor):
@@ -416,19 +473,19 @@ class MultiHeadAttention(nn.Module):
 
         :param tensor: [batch_size, seq_len, d_model]
         :return: [batch_size, n_head, seq_len, d_model//n_head], 输出矩阵是四维的，第二个维度是 head 维度
-      
+  
         # 将 Q、K、V 通过 reshape 函数拆分为 n_head 个头
         batch_size, seq_len, _ = q.shape
         q = q.reshape(batch_size, seq_len, n_head, d_model // n_head)
         k = k.reshape(batch_size, seq_len, n_head, d_model // n_head)
         v = v.reshape(batch_size, seq_len, n_head, d_model // n_head)
         """
-      
+  
         batch_size, seq_len, d_model = tensor.size()
         d_tensor = d_model // self.n_head
         split_tensor = tensor.view(batch_size, seq_len, self.n_head, d_tensor).transpose(1, 2)
         # it is similar with group convolution (split by number of heads)
-      
+  
         return split_tensor
   
     def concat(self, sa_output):
@@ -441,7 +498,7 @@ class MultiHeadAttention(nn.Module):
         batch_size, n_head, seq_len, d_tensor = sa_output.size()
         d_model = n_head * d_tensor
         concat_tensor = sa_output.transpose(1, 2).contiguous().view(batch_size, seq_len, d_model)
-      
+  
         return concat_tensor
 ```
 
@@ -455,7 +512,9 @@ Encoder 结构由 $\text{N} = 6$ 个相同的 encoder block 堆叠而成，每�
 
 ### 3.1 Add & Norm
 
-`Add & Norm` 层由 Add 和 Norm 两部分组成。这里的 Add 指 X + MultiHeadAttention(X)，是一种残差连接。Norm 是 Layer Normalization。Add & Norm 层计算过程用数学公式可表达为:
+`Add & Norm` 层由 Add 和 Norm 两部分组成。这里的 Add 是一种残差连接。Norm 是 Layer Normalization。
+
+Add & Norm 层计算过程用数学公式可表达为:
 
 $$
 \text{Layer Norm}(X + \text{MultiHeadAttention}(X)) \nonumber
@@ -480,10 +539,10 @@ class LayerNorm(nn.Module):
     def forward(self, x):
         mean = x.mean(-1, keepdim=True) # '-1' means last dimension. 
         var = x.var(-1, keepdim=True)
-      
+  
         out = (x - mean) / torch.sqrt(var + self.eps)
         out = self.gamma * out + self.beta
-      
+  
         return out
 
 # NLP Example
@@ -514,6 +573,13 @@ $$
 
 除了使用两个全连接层来完成线性变换，另外一种方式是使用 kernal_size = 1 的两个 $1\times 1$ 卷积层，输入输出维度不变，都是 512，中间维度是 2048。
 
+**FFN的作用**
+FFN 在 Transformer 架构中起到了关键作用，它通过非线性变换和特征增强，进一步处理自注意力机制的输出，帮助模型更好地捕捉输入数据的语义信息。
+- 非线性变换：通过引入非线性激活函数（如 ReLU），FFN 能够对输入特征进行复杂的非线性变换，增强模型的表达能力。
+- 特征增强：FFN 对每个位置的特征向量进行独立处理，进一步提取和增强特征，帮助模型更好地捕捉输入数据的语义信息。
+- 维度扩展与压缩：FFN 的第一个线性变换通常会将输入特征维度扩展到一个更大的维度（如从 512扩展到 2048），然后通过第二个线性变换再压缩回原始维度。这种设计可以增加模型的容量。
+
+
 PositionwiseFeedForward 层的 Pytorch 实现代码如下所示:
 
 ```python
@@ -530,7 +596,7 @@ class PositionwiseFeedForward(nn.Module):
         x = self.relu(x)
         x = self.dropout(x)
         x = self.fc2(x)
-      
+  
         return x
 ```
 
@@ -555,20 +621,20 @@ class EncoderLayer(nn.Module):
   
     def forward(self, x, mask=None):
         x_residual1 = x
-      
+  
         # 1, compute multi-head attention
         x = self.mha(q=x, k=x, v=x, mask=mask)
-      
+  
         # 2, add residual connection and apply layer norm
         x = self.ln1( x_residual1 + self.dropout1(x) )
         x_residual2 = x
-      
+  
         # 3, compute position-wise feed forward
         x = self.ffn(x)
-      
+  
         # 4, add residual connection and apply layer norm
         x = self.ln2( x_residual2 + self.dropout2(x) )
-      
+  
         return x
 
 class Encoder(nn.Module):
@@ -579,15 +645,15 @@ class Encoder(nn.Module):
                                         d_model = d_model,
                                         drop_prob = drop_prob,
                                         device=device)
-        self.layers = nn.ModuleList([EncoderLayer(d_model, ffn_hidden, n_head, drop_prob) 
-                                     for _ in range(n_layers)])
+
+        self.layers = nn.ModuleList([EncoderLayer(d_model, ffn_hidden, n_head, drop_prob)  for _ in range(n_layers)])
   
     def forward(self, x, mask=None):
-      
         x = self.emb(x)
-      
+
         for layer in self.layers:
             x = layer(x, mask)
+
         return x
 ```
 
@@ -603,7 +669,25 @@ class Encoder(nn.Module):
 
 注意，解码器块中的第一个注意力层关联到解码器的所有（过去的）输入，但是第二注意力层使用编码器的输出。因此，它可以访问整个输入句子，以最好地预测当前单词。这是非常有用的，因为不同的语言可以有语法规则将单词按不同的顺序排列，或者句子后面提供的一些上下文可能有助于确定给定单词的最佳翻译。
 
-另外，Decoder 组件后面还会接一个全连接层和 Softmax 层计算下一个翻译单词的概率。
+另外，Decoder 组件后面还会接一个全连接层和 Softmax 层。
+
+> 全连接层的作用: 
+将解码器输出的隐藏状态（维度为 d_model）映射到目标词汇表的大小，以便生成最终的输出。
+
+
+全连接层的输入和输出维度：
+- 输入维度：[batch_size, tgt_seq_len, d_model]
+    - batch_size：批量大小。
+    - tgt_seq_len：目标序列的长度。
+    - d_model：模型的隐藏维度。
+- 输出维度
+解码器之后的线性层的作用是将特征维度从 d_model 映射到目标词汇表的大小，以便生成每个位置上的单词概率分布：
+    - 输出维度：[batch_size, tgt_seq_len, tgt_vocab_size]
+    - tgt_vocab_size：目标词汇表的大小。
+
+> softmax层的作用
+生成概率分布：输出的张量可以经过 Softmax 函数进一步转换为概率分布，用于预测每个位置上最可能的单词。
+
 
 Decoder 组件的代码实现如下所示:
 
@@ -615,24 +699,24 @@ class DecoderLayer(nn.Module):
         self.mha1 = MultiHeadAttention(d_model, n_head)
         self.ln1 = LayerNorm(d_model)
         self.dropout1 = nn.Dropout(p=drop_prob)
-      
+  
         self.mha2 = MultiHeadAttention(d_model, n_head)
         self.ln2 = LayerNorm(d_model)
         self.dropout2 = nn.Dropout(p=drop_prob)
-      
+  
         self.ffn = PositionwiseFeedForward(d_model, ffn_hidden)
         self.ln3 = LayerNorm(d_model)
         self.dropout3 = nn.Dropout(p=drop_prob)
   
     def forward(self, dec_out, enc_out, trg_mask, src_mask):
         x_residual1 = dec_out
-      
+  
         # 1, compute multi-head attention
         x = self.mha1(q=dec_out, k=dec_out, v=dec_out, mask=trg_mask)
-      
+  
         # 2, add residual connection and apply layer norm
         x = self.ln1( x_residual1 + self.dropout1(x) )
-      
+  
         if enc_out is not None:
             # 3, compute encoder - decoder attention
             x_residual2 = x
@@ -640,13 +724,13 @@ class DecoderLayer(nn.Module):
   
             # 4, add residual connection and apply layer norm
             x = self.ln2( x_residual2 + self.dropout2(x) )
-      
+  
         # 5. positionwise feed forward network
         x_residual3 = x
         x = self.ffn(x)
         # 6, add residual connection and apply layer norm
         x = self.ln3( x_residual3 + self.dropout3(x) )
-      
+  
         return x
   
 class Decoder(nn.Module):
