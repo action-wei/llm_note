@@ -5,7 +5,6 @@ date: 2024-11-10 05:30:00
 summary: Casual Mask 机制的本质是为了构建下三角的注意力分数矩阵，从而实现因果模型只关注当前 token 与之前 token 的注意力关系，而不理会它与后续 token 的关系，即只"看"当前及前面的 tokens。
 categories: Transformer
 ---
-
 - [1. self-attention 结构](#1-self-attention-结构)
   - [1.1 self-attention 的一些问题](#11-self-attention-的一些问题)
 - [2. mask 原理](#2-mask-原理)
@@ -28,7 +27,7 @@ categories: Transformer
 
 1. 计算注意力得分：查询矩阵与键矩阵的转置相乘，得到注意力得分矩阵。
 2. 缩放：除以 $\sqrt{d_k}$
-3. 应用掩码：根据任务需求应用掩码，将未来位置或填充位置对应值置为 `-inf`。注意，对于训练无需 mask 操作，对于 推理只有 `prefill` 阶段需要 `mask`，用了 kv cache 优化的 `decode` 阶段不需要 `mask` 操作。
+3. 应用掩码：根据任务需求应用掩码，将未来位置或填充位置对应值置为 `-inf`。注意，对于训练无需 mask 操作，对于推理只有 `prefill` 阶段需要 `mask`，用了 kv cache 优化的 `decode` 阶段不需要 `mask` 操作。
 4. 归一化：通过 `softmax` 函数将注意力得分归一化为概率分布。
 5. 加权求和：将归一化后的注意力得分与值矩阵相乘，得到最终的注意力输出。
 
@@ -37,6 +36,7 @@ self-attention 的矩阵计算形式如下图所示:
 ![self-attention-matrix-calculation](../images/transformer_code/self-attention-matrix-calculation-2.png)
 
 假设 batch_size = 1, seq_len = 4, embedding_dim = 3, self-attention 的计算过程拆解及可视化如下所示。
+
 > 缩放即除以 $\sqrt{d_k}$ 的操作没有展示。
 
 **计算注意力得分**。在三个线性层对输入矩阵 $X$ 做线性变换得到 Q、K、V 矩阵后，执行 $QK^T$ 计算。
@@ -87,6 +87,7 @@ GPT 在训练阶段为了提高训练精度，所以采用了 “masked self-att
 通常来说，两个 token 向量的注意力分数（点积值）较高，则认为它们之间相似度较高；但是如果它们的点积值为负无穷大，则表示它们是“无限不相似”的，即互不相关。所以，具体实现上，可以通过创建 mask 矩阵，并将 mask 矩阵应用到 $QK^T$ 点积相似度矩阵上，从而实现注意力分数矩阵的有效条目(`entires`)的注意力分数不变，无效条目的注意力分数变为无穷大（`-inf`）。
 
 到这里，我们就还剩最后一个问题，`scores` 矩阵的哪些位置值应该置为 `-inf`，这里如果看过可视化 `self-attention` 计算过程图解，就能明白这本质上是**构建一个下三角 scores 矩阵**的问题！
+
 > 在 `llama` 系列模型中，是构建**上三角 `scores` 矩阵**。
 
 $QK^T$ 计算注意力分数，及应用 `Causal Mask` 过程的示意图如下所示：
@@ -212,26 +213,26 @@ class MultiHeadAttention(nn.Module):
     def __init__(self, embed_dim, num_heads):
         super(MultiHeadAttention, self).__init__()
         assert embed_dim % num_heads == 0, "embed_dim must be divisible by num_heads"
-        
+      
         self.embed_dim = embed_dim
         self.num_heads = num_heads
         self.head_dim = embed_dim // num_heads
-        
+      
         # 定义线性变换
         self.query = nn.Linear(embed_dim, embed_dim)
         self.key   = nn.Linear(embed_dim, embed_dim)
         self.value = nn.Linear(embed_dim, embed_dim)
-        
+      
         self.out = nn.Linear(embed_dim, embed_dim)
-        
+      
     def forward(self, x, mask=None):
         batch_size, seq_length, embed_dim = x.size()
-        
+      
         # 线性变换并分成多头
         Q = self.query(x).view(batch_size, seq_length, self.num_heads, self.head_dim).transpose(1,2)  # (batch, heads, seq, head_dim)
         K = self.key(x).view(batch_size, seq_length, self.num_heads, self.head_dim).transpose(1,2)
         V = self.value(x).view(batch_size, seq_length, self.num_heads, self.head_dim).transpose(1,2)
-        
+      
         # 计算原始注意力分数, # (batch, heads, seq, seq)
         scores = torch.matmul(Q, K.transpose(-2, -1)) / (self.head_dim ** 0.5)  
         print("before masked scores", scores)
@@ -239,15 +240,15 @@ class MultiHeadAttention(nn.Module):
         # 对 scores 应用 masked 
         if mask is not None:
             masked_scores = scores.masked_fill(mask == 0, float('-inf'))
-        
+      
         # 归一化，将注意力权重分数转为概率分布 dim 维度值相加等于，对于2D张量即每行元素值相加等于 1
         attn_scores = F.softmax(masked_scores, dim=-1)  # (batch, heads, seq, seq)
         # 加权求和 (batch, heads, seq, head_dim)
         context = torch.matmul(attn_scores, V)
-        
+      
         context = context.transpose(1,2).contiguous().view(batch_size, seq_length, embed_dim) 
         out = self.out(context)  # 最后的线性变换(batch, seq_length, embed_dim)
-        
+      
         # 为方便可视化, 使用 torch.squeeze() 函数来移除张量中所有大小为 1 的维度
         print(f"mask 矩阵:\n {mask.squeeze()} \n") 
         print(f"原始的注意力分数矩阵:\n {scores.squeeze()} \n")
@@ -273,14 +274,14 @@ def test_multihead_attention(vocab_size = 1000, batch_size = 1, seq_length = 4,e
     embedding_layer = nn.Embedding(vocab_size, embed_dim) # 将 input_ids 转为 embedding 向量
     mha_layer = MultiHeadAttention(embed_dim, num_heads) # 构建 MHA 模块
 
-    torch.manual_seed(0)    
+    torch.manual_seed(0)  
     input_ids = torch.randint(vocab_size, [batch_size, seq_length]) # 构建输入数据
     mask = generate_causal_mask(seq_length) # 创建注意力 mask, 默认下三角矩阵(张量)
-    
+  
     h = embedding_layer(input_ids)
     output = mha_layer(h, mask) # MHA 前向传播
     assert output.shape == (batch_size, seq_length, embed_dim), "输出形状不正确"
-    
+  
     print("多头注意力输出示例：")
     print(output)
 

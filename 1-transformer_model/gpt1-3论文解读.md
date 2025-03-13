@@ -27,11 +27,14 @@
 
 ### GPT1 概述
 
-参考计算机视觉模型，使用没有标记的文本去做**生成式预训练**，然后在特定任务上做判别式微调。
+> 参考计算机视觉模型，使用没有标记的文本去做**生成式预训练**，然后在特定任务上做判别式微调。
+
+GPT1 论文名称：Improving Language Understanding by Generative Pre-Training
 
 ### 导言
 
 **两大难点**：
+
 1. 训练阶段选什么样的损失函数？
 2. 如何把学习到的文本表示传递到下游的 nlp 子任务上？
 
@@ -44,9 +47,11 @@ gpt 论文提出一个半监督学习方法（后续论文叫自监督 self supe
 和标准语言模型一样，目标函数（损失函数）使用最大化似然估计（Maximum Likelihood Estimation, MLE），即最大化训练数据中真实序列的概率。对数似然的公式为：
 
 $$
-\mathcal{L_1}(\theta) = \sum_{i=1} \log P(u_i | u_{i-k}, \dots, u_{i-1}; \theta) \quad (1)$$
+\mathcal{L_1}(\theta) = \sum_{i=1} \log P(u_i | u_{i-k}, \dots, u_{i-1}; \theta) \quad (1)
+$$
 
 其中：
+
 - $\theta$ 是模型的参数（比如神经网络的权重）, 模型是 transformer 的解码器。
 - $(u_{i-k}, \dots, u_{i-1})$ 是上下文词, $k$ 是上下文窗口大小，是超参数，即每次拿连续 $k$ 个词预测 $k$ 个词后面的那一个词。
 - $u_i$ 是要预测的词。
@@ -123,7 +128,7 @@ GPT1 的模型结构如下图所示:
 
 > 只使用 transformer 解码器的 gpt1 发表后两个月，被只使用编码器和更大数据集训练的 bert 模型打败了。
 
-GPT2 论文的名字是语言模型是无监督的多任务学习器。
+GPT2 论文名字: Language Models are Unsupervised Multitask Learners
 
 ### 摘要
 
@@ -139,7 +144,7 @@ gpt2 提出 `zero-shot` 泛化到新的 nlp 下游子任务是无需成本的！
 
 构建下游子任务的时候，不能再引用模型预训练阶段没有见过的开始、中间和终止符号！下游任务的输入要跟之前预训练模型的输入文本一样，**即输入的形式更像自然语言文本表示**，**这就是现如今所有 llm 的提示词 prompt 工程的开端**！
 
-#### 训练数据集
+#### 训练数据集 
 
 在 Reddit 高质量帖子的基础上通过复杂的预处理工作构建了 `WebText2` 数据集，包含了 800 万个文本，总共 40GB 的文字。
 
@@ -169,7 +174,7 @@ class ModelConfig:
     embedding_dim: int  = 768 # hidden_size, n_embd
     num_heads: int = 12   # n_head
     vocab_size: int = 50257 # vocab_size
-    
+  
 
 class SimpleGPT2(nn.Module):
     def __init__(self, model_config: ModelConfig):
@@ -192,7 +197,7 @@ class SimpleGPT2(nn.Module):
 
         for transformer_block in self.transformer_blocks:
             h = transformer_block(h)
-        
+      
         # h = h.transpose(0, 1)  # 转回 [batch_size, seq_len, embedding_dim]
         logits = self.lm_head(h)
 
@@ -218,15 +223,15 @@ def generate_text(
             next_token_logits = outputs[:, -1, :] # (1, vocab_size) 默认 batch_size = 1
             # 沿着指定维度方向寻找并返回最大值的索引（需要哪个维度的最大值索引就指定哪个，跟 torch.max 维度的意义不一致）
             next_token_id = torch.argmax(next_token_logits, dim=-1).unsqueeze(0) # (1, 1)
-            
+          
             # 没有使用 kv cache 优化
             generated_ids = torch.cat((generated_ids, next_token_id), dim = 1) # [batch_size, seq_len, hidden_size]
             if next_token_id.item() == tokenizer.eos_token_id:
                 break
-    
+  
     # decode 的输入 token_ids 类型: Union[int, List[int], "np.ndarray", "torch.Tensor", "tf.Tensor"]
     generated_text = tokenizer.decode(generated_ids[0], skip_special_tokens=True) # (max_gen_len)
-    
+  
     return generated_text
 
 def test_model_gen(input_text: List[str]):
@@ -245,8 +250,9 @@ if __name__ == "__main__":
 
 ## 三 GPT3 论文解析
 
-GPT3 论文名字是“语言模型是 Few-Shot Learners”。论文的价值 = 新意度 * 有效性 * 问题的大小。
 > GPT2 论文更像是 GPT3 论文的一个过渡。
+
+GPT3 论文名字是“Language Models are Few-Shot Learners”。论文的价值 = 新意度 * 有效性 * 问题的大小。
 
 ### 摘要
 
@@ -258,6 +264,7 @@ GPT3 论文名字是“语言模型是 Few-Shot Learners”。论文的价值 = 
 
 提出问题：之前微调后模型的泛化性可能并不是那么好，只是因为在预训练模型上有点过拟合了。
 解决办法：
+
 - 训练一个很大的预训练模型，泛化性不错（meta-learning）。
 - 后面微调的时候，即使给出一些样本，但是不再更新预训练模型的权重（in—context learning）。
 
@@ -270,11 +277,8 @@ GPT-3 强调了 “few-shot” 学习能力，即通过少量的示例来完成�
 2，`GPT-3` 中的上下文学习主要体现在：
 
 1. **更大的上下文窗口**：GPT-3 通过增加模型的上下文窗口大小，能够处理更长的文本序列，这使得模型能够更好地理解和生成连贯的文本。
-
 2. **Few-shot学习**：**GPT-3 在给定少量示例的情况下，能够快速适应并执行特定的任务**。例如，如果给定几个问题和答案的对，GPT-3能够理解这是一个问答任务，并在没有进一步训练的情况下生成正确的答案。
-
 3. **上下文提示**：`GPT-3` 通过在输入中包含任务描述或示例来引导模型执行特定的任务。这种方法被称为上下文提示（contextual prompting），它使得GPT-3能够在没有显式微调的情况下执行多种任务。
-
 4. **多任务学习**：GPT-3 在预训练阶段就接触到了多种不同的任务和数据类型，这使得它在处理新任务时能够利用之前学到的相关知识。
 
 ### 方法
@@ -292,8 +296,9 @@ GPT-3 强调了 “few-shot” 学习能力，即通过少量的示例来完成�
 #### 模型和架构
 
 GPT3 模型和 GPT2 模型架一样。
+
 - GPT2 模型和 GPT1 模型的区别：修改初始化、预归一化（即把 Normalization 放到了模型的前面）和可以反转的词元（modified initialization, pre-normalization,
-and reversible tokenization described therein）。
+  and reversible tokenization described therein）。
 - GPT3 和 GPT2 的唯一不同是，在 `Transformer` 层中**采用了 `Sparse Transformer` 中的 `attention` 结构，即稀疏注意力机制**，这类似于 Sparse Transformer [CGRS19]，这允许模型处理更长的输入序列，同时减少了计算复杂度。
 
 GPT3 设计了 8 个不同尺度的模型：
@@ -305,6 +310,7 @@ GPT3 设计了 8 个不同尺度的模型：
 #### 训练数据集
 
 作者发现未经过滤或轻微过滤的 `Common Crawl` 版本的质量往往低于更精心策划的数据集。因此，我们采取了 $3$ 个步骤来提高数据集的平均质量：
+
 1. 下载并过滤了一个与一系列高质量参考语料库相似的 `Common Crawl` 版本。
 2. 在文档层面上进行了模糊去重，包括数据集内部和跨数据集的去重，以防止冗余并保持我们保留的验证集的完整性，以准确衡量过拟合情况。
 3. 还将已知的高质量参考语料库添加到训练数据中，以增强 `Common Crawl` 的数据多样性。

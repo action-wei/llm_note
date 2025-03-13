@@ -30,7 +30,7 @@
 
 ### 1.2 input IDs
 
-`LLM` 唯一必须的输入是 `input ids`，本质是 `tokens` 索引（Indices of input sequence tokens in the vocabulary.），即数整数向量。
+`LLM` 唯一必须的输入是 `input ids`，本质是 `tokens` 索引（Indices of input sequence tokens in the vocabulary.），即整数向量。
 
 - 将输入文本序列转换成 tokens，即 tokenized 过程；
 - 将输入文本序列转换成 input ids，即输入编码过程，数值对应的是 tokenizer 词汇表中的索引，
@@ -155,21 +155,21 @@ Transformer 模型架构主要由两个部件组成：
 
 Transformers 库支持通过 pipeline() 函数设置 `task` 任务类型参数，来跑通不同模型的推理，可实现一行代码跑通跨不同模态的多种任务，其支持的任务列表如下：
 
-| **任务**     | **描述**                                                 | **模态**        | **Pipeline**                                  |
-| ------------ | -------------------------------------------------------- | --------------- | --------------------------------------------- |
-| 文本分类     | 为给定的文本序列分配一个标签                             | NLP             | pipeline(task="sentiment-analysis")           |
-| 文本生成     | 根据给定的提示生成文本                                   | NLP             | pipeline(task="text-generation")              |
-| 命名实体识别 | 为序列里的每个token分配一个标签(人, 组织, 地址等等)      | NLP             | pipeline(task="ner")                          |
-| 问答系统     | 通过给定的上下文和问题, 在文本中提取答案                 | NLP             | pipeline(task="question-answering")           |
-| 掩盖填充     | 预测出正确的在序列中被掩盖的token                        | NLP             | pipeline(task="fill-mask")                    |
-| 文本摘要     | 为文本序列或文档生成总结                                 | NLP             | pipeline(task="summarization")                |
-| 文本翻译     | 将文本从一种语言翻译为另一种语言                         | NLP             | pipeline(task="translation")                  |
-| 图像分类     | 为图像分配一个标签                                       | Computer vision | pipeline(task="image-classification")         |
-| 图像分割     | 为图像中每个独立的像素分配标签(支持语义、全景和实例分割) | Computer vision | pipeline(task="image-segmentation")           |
-| 目标检测     | 预测图像中目标对象的边界框和类别                         | Computer vision | pipeline(task="object-detection")             |
-| 音频分类     | 给音频文件分配一个标签                                   | Audio           | pipeline(task="audio-classification")         |
-| 自动语音识别 | 将音频文件中的语音提取为文本                             | Audio           | pipeline(task="automatic-speech-recognition") |
-| 视觉问答     | 给定一个图像和一个问题，正确地回答有关图像的问题         | Multimodal      | pipeline(task="vqa")                          |
+| **任务** | **描述**                                           | **模态**  | **Pipeline**                            |
+| -------------- | -------------------------------------------------------- | --------------- | --------------------------------------------- |
+| 文本分类       | 为给定的文本序列分配一个标签                             | NLP             | pipeline(task="sentiment-analysis")           |
+| 文本生成       | 根据给定的提示生成文本                                   | NLP             | pipeline(task="text-generation")              |
+| 命名实体识别   | 为序列里的每个token分配一个标签(人, 组织, 地址等等)      | NLP             | pipeline(task="ner")                          |
+| 问答系统       | 通过给定的上下文和问题, 在文本中提取答案                 | NLP             | pipeline(task="question-answering")           |
+| 掩盖填充       | 预测出正确的在序列中被掩盖的token                        | NLP             | pipeline(task="fill-mask")                    |
+| 文本摘要       | 为文本序列或文档生成总结                                 | NLP             | pipeline(task="summarization")                |
+| 文本翻译       | 将文本从一种语言翻译为另一种语言                         | NLP             | pipeline(task="translation")                  |
+| 图像分类       | 为图像分配一个标签                                       | Computer vision | pipeline(task="image-classification")         |
+| 图像分割       | 为图像中每个独立的像素分配标签(支持语义、全景和实例分割) | Computer vision | pipeline(task="image-segmentation")           |
+| 目标检测       | 预测图像中目标对象的边界框和类别                         | Computer vision | pipeline(task="object-detection")             |
+| 音频分类       | 给音频文件分配一个标签                                   | Audio           | pipeline(task="audio-classification")         |
+| 自动语音识别   | 将音频文件中的语音提取为文本                             | Audio           | pipeline(task="automatic-speech-recognition") |
+| 视觉问答       | 给定一个图像和一个问题，正确地回答有关图像的问题         | Multimodal      | pipeline(task="vqa")                          |
 
 <img src="../images/transformers_basic/transformers_model_hub.png" width="60%" alt="Hub models">
 
@@ -281,6 +281,7 @@ tensor([[0.0021, 0.0018, 0.0115, 0.2121, 0.7725],
 ```python
 encoded_inputs = tokenizer.encode(input_text, return_tensors='pt')
 ```
+
 作用： 将原始文本 `input_text` 转换为模型可接受的输入格式。
 
 参数：
@@ -289,6 +290,7 @@ encoded_inputs = tokenizer.encode(input_text, return_tensors='pt')
 - `return_tensors='pt'`：指定返回 PyTorch 的张量格式。
 
 返回值： 一个包含编码后文本的张量，形状为 (batch_size, sequence_length)。
+
 - `batch_size`：输入文本的数量。对于单个输入文本，batch_size 为 1。
 - `sequence_length`：编码后文本的长度，即标记（token）的数量。
 

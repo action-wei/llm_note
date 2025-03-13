@@ -9,9 +9,11 @@
 
 Temperature 采样的温度系数意义、公式和知识蒸馏很相似，结合 softmax 的公式，都是如下形式:
 
-$$q_i = \frac{exp(z_i/T)}{\sum_j^K exp(z_j/T)}$$
+$$
+q_i = \frac{exp(z_i/T)}{\sum_j^K exp(z_j/T)}
+$$
 
-当 $T$ 趋于无穷大时，输出概率分布将趋于均匀分布，概率为 $1/K$, 此时信息熵是最大的。反过来，$T$ 趋于0时，正确类别的概率接近 $1$，输出结果就是确定的，信息熵为 0，`softmax` 的效果与 `argmax` 差不多.
+当 $T$ 趋于无穷大时，输出概率分布将趋于均匀分布，概率为 $1/K$, 此时信息熵是最大的。反过来，$T$ 趋于0时，正确类别的概率接近 $1$，输出结果就是确定的，信息熵为 0，`softmax` 的效果与 `argmax` 差不多。
 
 应用代码如下所示：
 
@@ -21,6 +23,7 @@ probs = torch.softmax(logits[:, -1, :] / temperature, dim=-1)
 ```
 
 代码详解：
+
 - `logits[:, -1]` 表示选择的是最后一个位置（seq_len 维度的最后一项）对应的 `logits`，形状变为 [batch_size, vocab_size]。因为在生成模型中的 prefill 阶段，我们只关心当前生成的最后一个 token 的分布。
 - temperature 作用是调整 logits 的分布，用于控制采样的随机性。总结就是，温度系数 $T$ 越大输出越平滑，结果越不确定，越小则越确定。具体来说，当 `temperature < 1.0`，分布会变得更加陡峭，更倾向于选择高概率的 token。`temperature > 1.0`，分布会变得更加平坦，增加随机性。
 
@@ -32,7 +35,7 @@ probs = torch.softmax(logits[:, -1, :] / temperature, dim=-1)
 
 - 贪心策略取的是概率最大的 `Top1` 的样本作为候选项，也就是永远取概率最大的样本作为一个候选项，但这样只能保证是局部最优，也就是当前步是最优的，达不到全局最优。
 - `Top-K` 采样取的是概率的前 `TopK` 的样本作为候选项, 也就是每一步都保留有 K 个候选项，能在一定程度上保证全局最优。但 top-k 有个问题就是 `k` 取多少，是最优的，这个难以确定。
-- `Top-p` 采样，针对的就是 `K` 值难确定的问题，通过设定阈值 `p`, 根据候选集累积概率之和达到阈值 `p`，来选择候选项的个数，也叫核采样。
+- `Top-p` 采样，针对的就是 `K` 值难确定的问题，通过设定阈值 `p`，根据候选集累积概率之和达到阈值 `p`，来选择候选项的个数，也叫核采样。
 
 ## 三、top-p 采样算法
 
@@ -43,15 +46,16 @@ probs = torch.softmax(logits[:, -1, :] / temperature, dim=-1)
 上图很好的展示了 Top-p 采样（Nucleus Sampling） 的过程，可以分为两个步骤：
 
 **1，确定候选集**：左图显示如何根据累积概率选择候选集：
-   - 每个单词（或 token）都有一个概率，例如：“United”: 12%，“Netherlands”: 2.7%，按照概率降序排列，逐步累加概率，直到累积概率达到阈值（例如 15%）。
-   - 一旦达到阈值，忽略其他概率更低的词（如 “Czech” 和 “U” 被排除）。
-   - 因此，此例中，候选集包括：`“United” (12%)`、`“Netherlands” (2.7%)`。
+
+- 每个单词（或 token）都有一个概率，例如：“United”: 12%，“Netherlands”: 2.7%，按照概率降序排列，逐步累加概率，直到累积概率达到阈值（例如 15%）。
+- 一旦达到阈值，忽略其他概率更低的词（如 “Czech” 和 “U” 被排除）。
+- 因此，此例中，候选集包括：`“United” (12%)`、`“Netherlands” (2.7%)`。
 
 **2，从候选集中采样**: 右图显示如何从候选集中基于归一化概率进行采样：
 
 - 候选集中的概率重新归一化。例如：
-    - United”: 原概率 12% 占候选集的 82%（12% / 15%）。
-    - “Netherlands”: 原概率 2.7% 占候选集的 18%（2.7% / 15%）。
+  - United”: 原概率 12% 占候选集的 82%（12% / 15%）。
+  - “Netherlands”: 原概率 2.7% 占候选集的 18%（2.7% / 15%）。
 - 根据归一化后的概率进行随机采样。最终生成的词可能是：“United”（较高概率）或 “Netherlands”（较低概率）。
 
 很明显，top-p 采样方法可以动态调整候选词的数量，避免了固定数量候选词可能带来的问题。另外，可以发现，top_p 越小，则过滤掉的小概率 token 越多，采样时的可选项目就越少，生成结果的多样性也就越小。
@@ -59,6 +63,7 @@ probs = torch.softmax(logits[:, -1, :] / temperature, dim=-1)
 ### 3.1 top-p 采样算法步骤:
 
 Top-p 采样的详细步骤：
+
 1. 概率排序：对模型在当前时间步生成的所有词汇的概率进行降序排序。
 2. 确定候选集：从排序后的词汇中，选择累积概率达到或超过设定阈值 p 的最小集合，记为 V_p。例如，若 p=0.9，则选择前几个词，使其概率之和至少为 0.9。
 3. 归一化概率：对候选集 V_p 中的词汇的概率进行重新归一化，使其和为 1。
@@ -97,7 +102,7 @@ def sample_top_p(probs, p):
     # 在 probs_idx 的最后一维（dim=-1）中，使用 next_token_sorted_idx 作为索引，提取对应的值。沿着 dim=1（列）进行索引提取
     # NOTE: torch.gather 函数按照给定的索引张量 index，从输入张量中收集 (获取) 数据，并返回一个与索引张量形状一致的张量。
     next_token = torch.gather(probs_idx, -1, index = next_token_sorted_idx)
-    
+  
     return next_token # 返回采样得到的下一个词的索引
 ```
 
@@ -120,6 +125,7 @@ def sample_top_p(probs, p):
 1，`torch.gather` 函数按照给定的索引张量 `index`，从输入张量中收集 (获取) 数据，并返回一个与索引张量形状一致的张量。
 
 示例代码：
+
 ```python
 import torch
 
@@ -156,11 +162,12 @@ torch.multinomial(input, num_samples, replacement=False, *, generator=None) -> L
 ```
 
 参数解释：
+
 1. `input`: 1D 或 2D 的张量，表示概率分布。它的值不需要是标准化的概率，但必须是非负的。如果是 2D 张量，每一行会被视为一个单独的分布。
 2. `num_samples`: 需要采样的样本数量。
 3. `replacement`: 是否是有放回采样。
-    - 如果为 True，可以多次采样同一个索引。
-    - 如果为 False，采样后不会重复选择。
+   - 如果为 True，可以多次采样同一个索引。
+   - 如果为 False，采样后不会重复选择。
 4. `generator`（可选）: 控制采样随机性的生成器。
 
 代码示例:
@@ -182,4 +189,4 @@ print("采样的索引:", sample_idx.item())
 
 - [如何解释 top_p 和 temperature 参数对 LLM 生成多样性的影响](https://zhuanlan.zhihu.com/p/713270088)
 - [ChatGPT 温度系数t与top-p, 超参怎么设置最优](https://zhuanlan.zhihu.com/p/631591713)
-- [Top-k & Top-p](https://docs.cohere.com/docs/controlling-generation-with-top-k-top-p)
+- [Top-k &amp; Top-p](https://docs.cohere.com/docs/controlling-generation-with-top-k-top-p)

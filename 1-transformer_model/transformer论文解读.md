@@ -8,7 +8,7 @@
 - [8. Embedding 和 Softmax 层](#8-embedding-和-softmax-层)
 - [9. Positional Encoding](#9-positional-encoding)
 - [10. 为什么使用 self-attention!](#10-为什么使用-self-attention)
-- [11，为什么只有 kv cache 没有 q cache？](#11为什么只有-kv-cache-没有-q-cache)
+- [11. 为什么只有 kv cache 没有 q cache？](#11为什么只有-kv-cache-没有-q-cache)
 - [参考资料](#参考资料)
 
 ### 1. 相关工作
@@ -50,6 +50,7 @@ Layer Norm 层的计算可视化如下图所示:
 
 `Decoder` 同样由 $N = 6$ 个相同的层组成。`Decoder` 的 `attention` 是带掩码的，确保位置 $i$ 的预测只能依赖于小于 $i$ 的已知输出。
 
+
 ### 5. 从 attention 到 Scaled Dot-Product Attention
 
 标准自注意力的数学表达式如下：
@@ -58,9 +59,9 @@ $$
 \text{Attention}(Q, K, V) = \text{softmax}\left(\frac{QK^T}{\sqrt{d_k}}\right)V
 $$
 
-(1) 首先，注意力函数可以描述为将一个查询（query）和一组键-值对（key-value pairs）映射到一个输出 output，$q$、$k$、$v$ 都是向量。输出都是对 `value` 进行加权求和得到的，每个 value 对应的权重 `weight` 是通过 $q$ 和 $k$ 之间的相似度计算得到。
+首先，注意力函数可以描述为将一个查询（query）和一组键-值对（key-value pairs）映射到一个输出 output，$q$、$k$、$v$ 都是向量。输出都是对 `value` 进行加权求和得到的，每个 value 对应的权重 `weight` 是通过 $q$ 和 $k$ 之间的相似度计算得到。
 
-(2) 将 q 和 k 的内积作为相似度（Dot-Product），然后除以向量的长度 $\sqrt{d_k}$（Scaled），结果再应用**逐行做 `softmax` 函数**，就会得到 $n$ 个非负且相加求和等于 $1$ 的权重向量，最后将权重应用于 value，就得到了最终输出 output。
+将 q 和 k 的内积作为相似度（Dot-Product），然后除以向量的长度 $\sqrt{d_k}$（Scaled），结果再应用**逐行做 `softmax` 函数**，就会得到 $n$ 个非负且相加求和等于 $1$ 的权重向量，最后将权重应用于 value，就得到了最终输出 output。
 
 **余弦相似度常用来比较两个向量的相似度（距离）**，伪代码如下：
 
@@ -70,7 +71,7 @@ $$
 
 实际中，为了方便计算，会同时对一组查询（queries）计算注意力函数，将 q、k、v 都是构建成矩阵 $Q$、$K$、$V$（ 维度相等），涉及到两个矩阵乘法。
 
-(3) transformer 论文中注意力机制和之前的点积注意力机制不同之处是引入了除以 $\sqrt{d_k}$ 做 scale，并使用 qk^t 点积，因为矩阵乘法更高效。
+> transformer 论文中注意力机制和之前的点积注意力机制Dot-Product Attention不同之处是引入了scale，即除以 $\sqrt{d_k}$
 
 **1.为什么需要做 `scale`：**
 
@@ -87,8 +88,6 @@ normalized\_value = \frac{x-\mu}{\sigma}
 $$
 
 其中，$\mu$ 是数据的均值，$\sigma$ 是数据的标准差。
-
-> 作者提出的注意力机制算法跟之前的 Dot-Product Attention 相比就是单纯多了 Scaled（除以 $\sqrt{d_k}$）。
 
 另外 decoder 模块的 attention  多了一个 `Mask`，实际是第 $t$ 时刻的 $q$ 只能看前面阶段的对应的 $(k, v)$ 对，计算当中表现就是对于 $q_t$ 和 $k_t$ 及其之后的那些权重值都替换成一个极大的负数，这样经过 `softmax` 后（做指数 $e^{w_t}$），对应位置的 $v$ 就变成了 0。
 
@@ -122,7 +121,6 @@ $Q$、$K$ 的线性(映射)层的权重维度是 $[d_\text{model}, d_k]$，$V$ �
 
 1. 解码器中的第二个注意力层，其查询 $q$ 来自前一层的解码器层，但 $k$、$v$ 来自于编码器最后一层的输出。
 2. 编码器第一个注意力层：不考虑多头和线性投影层的情况，三个输入 $q$ $k$ $v$ 本质上都是一个东西，三个输入都是原始输入本身自己，输出就是输入本身的加权和，而权重又来源自己本身跟跟各个向量的相似度函数，所以也叫自注意力层（self-attention）。
-3. 解码器的第一个注意力层：编码器的最终输出作为 key value 输入进来，解码器下一层的输出作为 query 输入进来。
 
 **作用**：
 
@@ -162,7 +160,29 @@ $$
 - Self-Attention：**能够在一层内直接捕获全局依赖关系**。每个 token 都能与序列中任意位置的 token 进行信息交互，不受固定窗口大小限制。
 - CNN：**典型的卷积操作受限于卷积核的大小，捕获的是局部信息**。虽然可以通过堆叠多层卷积或使用扩张卷积来扩大感受野，但这种扩展是逐层进行的，且依赖于网络深度。
 
-### 11，为什么只有 kv cache 没有 q cache？
+**self-attention 与 MLP对比**
+
+理论上，MLP（多层感知机）可以学习输入数据中的中间相关性，但与Self-Attention相比，MLP在捕捉长距离依赖关系方面存在天然的劣势。Self-Attention通过计算所有位置之间的注意力分数，能够并行地处理输入序列中的所有元素，从而高效地捕捉全局信息。而MLP通常是对每个位置独立操作，难以直接学习到这种全局依赖关系。
+
+然而，一些研究提出了在特定条件下用MLP部分替代Self-Attention的可能性。例如，有研究指出，在Transformer的某些底层模块中，MLP层可以替代非必要的注意力层，通过将注意力层退化为恒等映射并整合到后续的MLP层中，从而减少计算量。这种方法在实验中显示出一定的有效性，例如在ImageNet-1k数据集上，可以移除40%的注意力层，同时不损失性能。
+
+根据最新的研究和实验结果，使用MLP（多层感知机）替代Transformer中的Self-Attention机制是可行的，并且在某些任务上已经取得了与原始Transformer相当甚至更优的性能：
+
+1】在AAAI 2024上发表的一篇论文《Rethinking Attention: Exploring Shallow Feed-Forward Neural Networks as an Alternative to Attention Layers in Transformers》中，作者提出了一种使用浅层MLP替代Transformer中注意力模块的方法。他们设计了四种不同程度的MLP替换模式：
+
+* **ALR（Attention Layer Replacement）** ：仅用MLP替换多头注意力（MHA）块。
+* **ALRR（Attention Layer with Residual Connection Replacement）** ：用MLP替换MHA模块及其残差连接。
+* **ASLR（Attention Separate heads Layer Replacement）** ：用单独的MLP替换MHA模块的每个头。
+* **ELR（Encoder Layer Replacement）** ：完全用MLP替换编码器层。
+
+实验结果表明，在IWSLT2017数据集上，这些替换模式均能达到与原始Transformer相当的性能。特别是ALRR模式，在机器翻译任务中表现出色，BLEU分数与原始模型接近。
+
+2】清华大学的研究工作《Beyond Self-attention: External Attention using Two Linear Layers for Visual Tasks》提出了一种外部注意力机制，通过两个线性层替代传统的Self-Attention。该方法在图像分类、语义分割、图像生成等任务上进行了验证，结果表明，这种替代方法可以在保持精度的同时显著提升速度。
+
+3】微软亚研院提出了一种无注意力的网络结构sMLPNet，使用稀疏MLP模块替代自注意力。sMLPNet通过轴向全局依赖建模，降低了计算复杂度，同时保持了高性能。实验结果显示，sMLPNet在ImageNet数据集上取得了与Swin Transformer相当的精度。
+
+
+### 11. 为什么只有 kv cache 没有 q cache？
 
 **atten 的输出最后一行（最后一个 token）只依赖 q 的最后一行**，所以当然不需 q kache，但是依赖 k 的全部行。
 
