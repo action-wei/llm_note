@@ -26,13 +26,13 @@ $$
 c_t^Q = W^{DQ} h_t \in \mathbb{R}^{B \times L \times 1536}
 $$
 
-2，然后，再将其投影到 $\mathbb{R}^{H \times 128}$ 的多头向量空间上（其中 $H=128$ 是 `heads` 数，对应配置文件中的 `qk_nope_head_dim` 参数），得到了 Q 向量的第一部分: $q_t^C$
+2，然后，将$c_t^Q$投影到 $\mathbb{R}^{H \times 128}$ 的多头向量空间上（其中 $H=128$ 是 `heads` 数，对应配置文件中的 `qk_nope_head_dim` 参数），得到了 Q 向量的第一部分: $q_t^C$
 
 $$
 q_t^C = W^{UQ} c_t^Q \in \mathbb{R}^{B \times L \times H \times 128}
 $$
 
-3，再将其投影到 $\mathbb{R}^{H \times 64}$（对应模型配置文件中的 `qk_rope_head_dim` 参数）上，并使用 RoPE 嵌入位置信息，得到 Q 向量的第二部分: $q_t^R$
+3，再将输入向量$h_t$投影到 $\mathbb{R}^{H \times 64}$（对应模型配置文件中的 `qk_rope_head_dim` 参数）上，并使用 RoPE 嵌入位置信息，得到 Q 向量的第二部分: $q_t^R$
 
 $$
 q_t^R = \mathrm{RoPE}(W^{QR} h_t) \in \mathbb{R}^{B \times L \times H \times 64}
@@ -59,7 +59,7 @@ $$
 c_t^{KV} = W^{DKV} h_t \in \mathbb{R}^{B \times L \times 512}
 $$
 
-2，然后，和 $Q$ 向量的计算过程类似，再将其投影到 $\mathbb{R}^{H \times 128}$ 的多头向量空间上（其中 $H=128$ 是 `heads` 数，$128$ 对应模型配置文件中的 `qk_rope_head_dim` 参数，得到了 $K$ 向量的第一部分 $k_t^C$。
+2，然后，和 $Q$ 向量的计算过程类似，再将其投影到 $\mathbb{R}^{H \times 128}$ 的多头向量空间上（其中 $H=128$ 是 `heads` 数，$128$ 对应模型配置文件中的 `qk_rope_head_dim` 参数），得到了 $K$ 向量的第一部分 $k_t^C$。
 
 $$
 k_t^C = W^{UK}c_t^{K} \in \mathbb{R}^{B\times L\times H\times 128}
@@ -99,7 +99,7 @@ Self-Attention 的计算过程和传统的 `MHA` 一模一样。同样也是首�
 
 $$
 p = \mathrm{softmax}\left(\frac{q_t^\top k_t + \mathrm{Mask}}{\sqrt{192}}\right) = 
-\mathrm{softmax}\left(\frac{{q_t^C}^\top k_t^C + {q_t^R}^\top k_t^R + \mathrm{Mask}}{\sqrt{128 + 64}} \right)
+\mathrm{softmax}\left(\frac{{q_t^C}^\top k_t^C + {q_t^R}^\top k_t^R + \mathrm{Mask}}{\sqrt{128 + 64}} \right),
 \mathrm{softmax}\left(\frac{{q_t^C}^\top k_t^C + {q_t^R}^\top k_t^R + \mathrm{Mask}} {\sqrt{128 + 64}} \right)
 \in \mathbb{R}^{B \times L \times H \times L}
 $$
@@ -112,7 +112,7 @@ $$
 o = p \cdot \mathbf{v}_t \in \mathbb{R}^{B \times L \times H \times 128} \cong \mathbb{R}^{B \times L \times 16384}
 $$
 
-其中，$16384 = 128 \times 128 = \text{num\;attention\;heads * v\;head\;dim}$。最后，经过另一个注意力输出矩阵的投影（5120 是 `hidden_size`），就能得到 MLA 的最终输出：
+其中，$16384 = 128 \times 128 = \text{num\;attention\;heads * v\;head\_dim}$。最后，经过另一个注意力输出矩阵的投影（5120 是 `hidden_size`），就能得到 MLA 的最终输出：
 
 $$
 u = W^O o \in \mathbb{R}^{B \times L \times 5120}
@@ -149,13 +149,13 @@ class DeepseekV2MLA(nn.Module):
 
         self.q_down_proj = nn.Linear(self.hidden_size, self.q_lora_rank)
         self.q_down_rmsnorm = DeepseekV2RMSNorm(self.q_lora_rank)
-      
+    
         self.kv_down_proj = nn.Linear(
             self.hidden_size, 
             self.kv_lora_rank + config.qk_rope_head_dim
         )
         self.kv_down_rmsnorm = DeepseekV2RMSNorm(self.kv_lora_rank)
-      
+    
         # MLA 相关 part2: 解压缩
         self.q_head_dim = self.qk_nope_head_dim  + self.qk_rope_head_dim
         self.q_up_proj = nn.Linear(
@@ -169,7 +169,7 @@ class DeepseekV2MLA(nn.Module):
             self.num_heads * (self.q_head_dim - self.qk_rope_head_dim + self.v_head_dim),
             bias=False,
         )
-      
+    
         # MLA 相关 part3: 切片 q k 张量，以及 rope 旋转位置编码
         self.rotary_emb = DeepseekV2RotaryEmbedding(
             config.qk_rope_head_dim,
@@ -194,7 +194,7 @@ class DeepseekV2MLA(nn.Module):
 
         # 2, kv 压缩和解压缩
         kv_down = self.kv_down_proj(hidden_states)
-      
+    
         # compressed_kv 压缩后的 kv 张量
         compressed_kv, k_rope = torch.split(
             kv_down,
@@ -220,7 +220,7 @@ class DeepseekV2MLA(nn.Module):
         # 3, 计算 cos 和 sin，并应用 rope 旋转位置编码
         kv_seq_len = value_states.shape[-2] # shape (b, nums_head, seq_len, v_head_dim)
         cos, sin = self.rotary_emb(value_states, seq_len=kv_seq_len)
-      
+    
         q_rope, k_rope = apply_rotary_pos_emb(q_rope, k_rope, cos, sin, position_ids)
 
         # 4, 执行 self-attention 计算
@@ -236,12 +236,12 @@ class DeepseekV2MLA(nn.Module):
 
         if casual_mask is not None:
             scores = scores.masked_fill(casual_mask == 0, float('-inf'))
-      
+    
         attn_weights = F.softmax(scores, dim=-1).to(query_states.dtype)
         attn_weights = F.dropout(
             attn_weights, p=self.attention_dropout, training=self.training
         ) # attn_weights shape: [bs, num_heads, seq_len, seq_len]
-      
+    
         attn_output = torch.matmul(attn_weights, value_states) # shape: [bs, num_heads, seq_len, head_dim]
         attn_output = attn_output.transpose(1, 2).contiguous().reshape(batch_size, q_len, self.num_heads * self.v_head_dim)
 
