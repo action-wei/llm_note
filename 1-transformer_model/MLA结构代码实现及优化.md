@@ -17,26 +17,35 @@ DeepDeekv2 的模型配置如下所示:
 </div>
 
 ### 1.1 Q 向量计算
+
 > 大部分参考 [DeepSeek-V2高性能推理优化笔记：MLA优化](https://github.com/madsys-dev/deepseekv2-profile/blob/main/workspace/blog/optimizing-mla.md)，部分细节做了修改和优化， MLA 结构图以及这章节的公式更多的是给出 MLA 过程和细节，实际的代码实现没有一一对应。
 
-1，在 DeepSeek-V2 中，Q 向量也采用了低秩压缩的方式。首先，将输入向量投影到一个 `1536`（**对应模型配置文件中的 `q_lora_rank` 参数**）维的低维空间，得到 Latent $c_t^Q$。
+1，在 DeepSeek-V2 中，Q 向量也采用了低秩压缩的方式。首先，将输入向量投影到一个 `1536`（**对应模型配置文件中的 `q_lora_rank` 参数**）维的低维空间，得到 Latent $c_t^Q$
 
-$$c_t^Q = W^{DQ} h_t \in \mathbb{R}^{B \times L \times 1536}$$
+$$
+c_t^Q = W^{DQ} h_t \in \mathbb{R}^{B \times L \times 1536}
+$$
 
-2，然后，再将其投影到 $\mathbb{R}^{H \times 128}$ 的多头向量空间上（其中 $H=128$ 是 `heads` 数，对应配置文件中的 `qk_nope_head_dim` 参数），得到了 Q 向量的第一部分: $q_t^C$。
+2，然后，再将其投影到 $\mathbb{R}^{H \times 128}$ 的多头向量空间上（其中 $H=128$ 是 `heads` 数，对应配置文件中的 `qk_nope_head_dim` 参数），得到了 Q 向量的第一部分: $q_t^C$
 
-$$q_t^C = W^{UQ} c_t^Q \in \mathbb{R}^{B \times L \times H \times 128}$$
+$$
+q_t^C = W^{UQ} c_t^Q \in \mathbb{R}^{B \times L \times H \times 128}
+$$
 
-3，再将其投影到 $\mathbb{R}^{H \times 64}$（对应模型配置文件中的 `qk_rope_head_dim` 参数）上，并使用 RoPE 嵌入位置信息，得到 Q 向量的第二部分: $q_t^R$。
+3，再将其投影到 $\mathbb{R}^{H \times 64}$（对应模型配置文件中的 `qk_rope_head_dim` 参数）上，并使用 RoPE 嵌入位置信息，得到 Q 向量的第二部分: $q_t^R$
 
-$$q_t^R = \mathrm{RoPE}(W^{QR} h_t) \in \mathbb{R}^{B \times L \times H \times 64}$$
+$$
+q_t^R = \mathrm{RoPE}(W^{QR} h_t) \in \mathbb{R}^{B \times L \times H \times 64}
+$$
 
-4，最后，将这两部分进行 `concat` 拼接得到最终的 $Q$ 向量：$q_t$。
+4，最后，将这两部分进行 `concat` 拼接得到最终的 $Q$ 向量：$q_t$
 
-$$ q_t = [q_t^C, q_t^R] \in \mathbb{R}^{B \times L \times H \times 192}$$
-
+$$
+q_t = [q_t^C, q_t^R] \in \mathbb{R}^{B \times L \times H \times 192}
+$$
 
 其中：
+
 - $B$: `batch_size` 批量大小；
 - $L$: `seq_len` 序列长度；
 - $H$: `heads` 注意力头数；
@@ -46,29 +55,39 @@ $$ q_t = [q_t^C, q_t^R] \in \mathbb{R}^{B \times L \times H \times 192}$$
 
 1，计算 $KV$ 向量时，首先，将输入向量投影到一个 $512$（**对应模型配置文件中的 `kv_lora_rank` 参数**）维的低维空间，得到 Latent $c_t^{KV}$。
 
-$$c_t^{KV} = W^{DKV} h_t \in \mathbb{R}^{B \times L \times 512}$$
+$$
+c_t^{KV} = W^{DKV} h_t \in \mathbb{R}^{B \times L \times 512}
+$$
 
 2，然后，和 $Q$ 向量的计算过程类似，再将其投影到 $\mathbb{R}^{H \times 128}$ 的多头向量空间上（其中 $H=128$ 是 `heads` 数，$128$ 对应模型配置文件中的 `qk_rope_head_dim` 参数，得到了 $K$ 向量的第一部分 $k_t^C$。
 
-$$k_t^C = W^{UK}c_t^{K} \in \mathbb{R}^{B\times L\times H\times 128}$$
+$$
+k_t^C = W^{UK}c_t^{K} \in \mathbb{R}^{B\times L\times H\times 128}
+$$
 
 3，将输入向量投影到 $64$（对应模型配置文件中的 `qk_rope_head_dim` 参数）维向量空间，并应用 RoPE 嵌入位置信息得到 $K$ 向量的第二部分： $k_t^R$。
 
-$$k_t^R = \mathrm{RoPE}(W^{KR} h_t) \in \mathbb{R}^{B \times L \times 1 \times 64}$$
+$$
+k_t^R = \mathrm{RoPE}(W^{KR} h_t) \in \mathbb{R}^{B \times L \times 1 \times 64}
+$$
 
 4，最后，和 $Q$ 不同的是，完整的 $K$ 是将 $k_t^R$ **广播到每个 `head` 后与 $k_t^C$ `concate` 拼接得到**：
 
-$$k_t = \begin{bmatrix}
+$$
+k_t = \begin{bmatrix}
     k_{t,1}^C & k_t^R \\ 
     k_{t,2}^C & k_t^R \\
     \vdots & \vdots \\
-    \end{bmatrix} \in \mathbb{R}^{B \times L \times H \times 192}$$
+    \end{bmatrix} \in \mathbb{R}^{B \times L \times H \times 192}
+$$
 
 上述广播后拼接的方式意味着，**每个 head 的 RoPE 部分是完全相同的**。
 
 $V$ 向量因为不需要执行 `ROPE` 操作，所以它的的计算较为简单，直接将 $c_t^{KV}$ 解压缩（升维）到 $\mathbb{R}^{H \times 128}$ 即可：
 
-$$ \mathbf{v}_t = W^{UV} c_t^{KV} \in \mathbb{R}^{B \times L \times H \times 128} $$
+$$
+\mathbf{v}_t = W^{UV} c_t^{KV} \in \mathbb{R}^{B \times L \times H \times 128}
+$$
 
 注意: $k_t^R$ 和 $c_t^{KV}$ 是需要缓冲的向量。前面计算得到 $q_t$、$k_t$ 和 $\mathbf{v}_t$ 用来执行 self-attention 计算。
 
@@ -77,19 +96,27 @@ $$ \mathbf{v}_t = W^{UV} c_t^{KV} \in \mathbb{R}^{B \times L \times H \times 128
 Self-Attention 的计算过程和传统的 `MHA` 一模一样。同样也是首先计算 `attention score`：
 
 <!-- {% raw %} -->
-$$p = \mathrm{softmax}\left(\frac{q_t^\top k_t + \mathrm{Mask}}{\sqrt{192}}\right) = 
+
+$$
+p = \mathrm{softmax}\left(\frac{q_t^\top k_t + \mathrm{Mask}}{\sqrt{192}}\right) = 
 \mathrm{softmax}\left(\frac{{q_t^C}^\top k_t^C + {q_t^R}^\top k_t^R + \mathrm{Mask}}{\sqrt{128 + 64}} \right)
 \mathrm{softmax}\left(\frac{{q_t^C}^\top k_t^C + {q_t^R}^\top k_t^R + \mathrm{Mask}} {\sqrt{128 + 64}} \right)
-\in \mathbb{R}^{B \times L \times H \times L}$$
+\in \mathbb{R}^{B \times L \times H \times L}
+$$
+
 <!-- {% endraw %} -->
 
 计算对 $V$的加权和，并将所有 heads 压平（即 heads * head_dim），得到 Attention 输出：
 
-$$ o = p \cdot \mathbf{v}_t \in \mathbb{R}^{B \times L \times H \times 128} \cong \mathbb{R}^{B \times L \times 16384} $$
+$$
+o = p \cdot \mathbf{v}_t \in \mathbb{R}^{B \times L \times H \times 128} \cong \mathbb{R}^{B \times L \times 16384}
+$$
 
 其中，$16384 = 128 \times 128 = \text{num\;attention\;heads * v\;head\;dim}$。最后，经过另一个注意力输出矩阵的投影（5120 是 `hidden_size`），就能得到 MLA 的最终输出：
 
-$$u = W^O o \in \mathbb{R}^{B \times L \times 5120}$$
+$$
+u = W^O o \in \mathbb{R}^{B \times L \times 5120}
+$$
 
 ## 2. 标准 MLA 模块的代码实现
 
@@ -122,13 +149,13 @@ class DeepseekV2MLA(nn.Module):
 
         self.q_down_proj = nn.Linear(self.hidden_size, self.q_lora_rank)
         self.q_down_rmsnorm = DeepseekV2RMSNorm(self.q_lora_rank)
-        
+      
         self.kv_down_proj = nn.Linear(
             self.hidden_size, 
             self.kv_lora_rank + config.qk_rope_head_dim
         )
         self.kv_down_rmsnorm = DeepseekV2RMSNorm(self.kv_lora_rank)
-        
+      
         # MLA 相关 part2: 解压缩
         self.q_head_dim = self.qk_nope_head_dim  + self.qk_rope_head_dim
         self.q_up_proj = nn.Linear(
@@ -142,7 +169,7 @@ class DeepseekV2MLA(nn.Module):
             self.num_heads * (self.q_head_dim - self.qk_rope_head_dim + self.v_head_dim),
             bias=False,
         )
-        
+      
         # MLA 相关 part3: 切片 q k 张量，以及 rope 旋转位置编码
         self.rotary_emb = DeepseekV2RotaryEmbedding(
             config.qk_rope_head_dim,
@@ -167,7 +194,7 @@ class DeepseekV2MLA(nn.Module):
 
         # 2, kv 压缩和解压缩
         kv_down = self.kv_down_proj(hidden_states)
-        
+      
         # compressed_kv 压缩后的 kv 张量
         compressed_kv, k_rope = torch.split(
             kv_down,
@@ -193,7 +220,7 @@ class DeepseekV2MLA(nn.Module):
         # 3, 计算 cos 和 sin，并应用 rope 旋转位置编码
         kv_seq_len = value_states.shape[-2] # shape (b, nums_head, seq_len, v_head_dim)
         cos, sin = self.rotary_emb(value_states, seq_len=kv_seq_len)
-        
+      
         q_rope, k_rope = apply_rotary_pos_emb(q_rope, k_rope, cos, sin, position_ids)
 
         # 4, 执行 self-attention 计算
@@ -209,12 +236,12 @@ class DeepseekV2MLA(nn.Module):
 
         if casual_mask is not None:
             scores = scores.masked_fill(casual_mask == 0, float('-inf'))
-        
+      
         attn_weights = F.softmax(scores, dim=-1).to(query_states.dtype)
         attn_weights = F.dropout(
             attn_weights, p=self.attention_dropout, training=self.training
         ) # attn_weights shape: [bs, num_heads, seq_len, seq_len]
-        
+      
         attn_output = torch.matmul(attn_weights, value_states) # shape: [bs, num_heads, seq_len, head_dim]
         attn_output = attn_output.transpose(1, 2).contiguous().reshape(batch_size, q_len, self.num_heads * self.v_head_dim)
 
@@ -234,11 +261,13 @@ class DeepseekV2MLA(nn.Module):
 
 上述 `CacheCompressed` 的实现代码其实并不能实质减少 KV Cache 过大的问题，因为在计算 MLA 的时候，仍然需要存储解压后的完整的 `KV Cache`（中间激活），这很可能引起 OOM 崩溃。
 
-DeepSeek-V2 论文中提出，可以将 KV 的解压缩矩阵吸收到Q-projection 和 Out-projection 中，从而可以在不解压缩 KV Cache的 情况下直接计算最终的 Attention 结果。 
+DeepSeek-V2 论文中提出，可以将 KV 的解压缩矩阵吸收到Q-projection 和 Out-projection 中，从而可以在不解压缩 KV Cache的 情况下直接计算最终的 Attention 结果。
 
 1，**对于 K 的吸收**（吸收进 self-attention 算子中， 相当于算子合并），在 Attention Score 的计算公式中，K 向量的非 RoPE 部分的可以做如下展开：
 
-$${q_t^C}^\top k_t^C = (W^{UQ} c_t^Q)^{\top} W^{UK} c_t^{KV} = {c_t^Q}^{\top}{W^{UQ}}^{\top} W^{UK} c_t^{KV} = ({c_t^Q}^{\top}{W^{UQ}}^{\top} W^{UK}) c_t^{KV}$$
+$$
+{q_t^C}^\top k_t^C = (W^{UQ} c_t^Q)^{\top} W^{UK} c_t^{KV} = {c_t^Q}^{\top}{W^{UQ}}^{\top} W^{UK} c_t^{KV} = ({c_t^Q}^{\top}{W^{UQ}}^{\top} W^{UK}) c_t^{KV}
+$$
 
 即通过矩阵乘法结合律，可以改为计算 $({c_t^Q}^{\top}{W^{UQ}}^{\top} W^{UK})$，避免了解压缩出完整的 $K$ 矩阵。另外，在原始版本的解压缩的过程中，由于每个 token 的 key 都需要与 $W^{UK}$ 相乘才能得到，因此计算量较大；矩阵吸收后，$W^{UK}$ 只需要对 $q_t^C$ 这一个向量相乘，也大大减少了浮点计算量。
 
@@ -264,6 +293,7 @@ u   = einsum('hdD,bhqd->bhD', W_o, o)     # (6)
 
 其中生成值向量 v_t：
 输入：
+
 - W_UV：权重矩阵，形状为 (h, d, c)，其中 h 是注意力头数，d 是值向量维度，c 是输入特征维度。
 - c_t_KV：键值上下文向量，形状为 (b, l, c)，其中 b 是批次大小，l 是序列长度。
 
@@ -275,9 +305,11 @@ u   = einsum('hdD,bhqd->bhD', W_o, o)     # (6)
 先计算加权上下文 o_:
 
 **操作：**
+
 - 将注意力权重 attn_weights 直接作用于原始上下文 c_t_KV，生成中间结果 o_，形状为 (b, h, q, c)。
 
 **意义：**
+
 - 避免显式生成 v_t，减少存储 (b, l, h, d) 的开销。
 
 上述优化方法的实现和对比测试代码如下所示:
@@ -341,11 +373,11 @@ def validate_equivalence():
     v_t_orig = torch.einsum('hdc,blc->blhd', W_UV, c_t_KV)
     o_orig = torch.einsum('bqhl,blhd->bqhd', attn_weights, v_t_orig)
     u_orig = torch.einsum('hdD,bhqd->bhD', W_o, o_orig.permute(0, 2, 1, 3))
-    
+  
     v_t_opt = torch.einsum('hdc,blc->blhd', W_UV, c_t_KV)
     o_opt = torch.einsum('bqhl,blhd->bqhd', attn_weights, v_t_opt)
     u_opt = torch.einsum('hdD,bhqd->bhD', W_o, o_opt.permute(0, 2, 1, 3))
-    
+  
     # 检查是否等价
     assert torch.allclose(u_orig, u_opt, atol=1e-4), "两种方法结果不一致！"
     print("两种方法结果一致，验证通过。")
