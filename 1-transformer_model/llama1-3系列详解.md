@@ -105,6 +105,19 @@ llama 模型系列的超参数详细信息在表 2 中给出。
 
 ### 1.3 RMSNorm
 
+**归一化层的作用简介：**
+
+归一化层自2015年批量归一化（[Batch Normalization](https://zhida.zhihu.com/search?content_id=255090495&content_type=Article&match_order=1&q=Batch+Normalization&zhida_source=entity), BN）的提出以来，迅速成为现代神经网络的核心组件。它们不仅加速了模型的收敛，还提高了训练的稳定性。随着网络变得越来越深和宽，归一化层的作用变得愈发重要。
+
+分析表明，LN层通过**将极端值“压缩”到较小的范围内**，使得模型能够更稳定地训练。这种非线性压缩效应被认为是归一化层的关键作用之一。
+
+**归一化层分类：**
+
+- Batch Norm(BN)：对于每个特征维度，计算它在整个批次中的均值和标准差，然后对该特征进行归一化。
+- Layer Norm(LN)：对每个样本单独计算其所有特征的均值和标准差，然后在该样本内进行归一化。
+
+`Batch norm` 和 `layer norm` 的区别一句话总结就是 `bn` 是切特征，`ln` 是切样本。
+
 **LayerNorm**：
 
 LayerNorm 通过对输入和权重矩进行重新中心化和重新缩放（`re-centering 和re-scaling`，即减均值和除方差，也称平移不变性和缩放不变性），来帮助稳定训练并加速模型收敛。
@@ -139,6 +152,7 @@ $$
 $$
 
 其中，$\gamma$ 是可学习的缩放参数，$\text{eps}$ 的作用是为了保持数值稳定性。$d$ 输入 `tokens` 的数量，大小为 `batch_size * seq_len`。
+
 
 以下是 RMSNorm 在 PyTorch 中的简单实现，使用了 RMS（均方根）来对输入进行归一化处理。
 
@@ -188,6 +202,38 @@ else:
 
 > 输入和输出的形状:  torch.Size([2, 4, 8]) torch.Size([2, 4, 8])
 > 结果验证通过: 自己实现的 RMSNorm 和 pytorch nn.RMSNorm 结果一致！
+
+
+**去归一化层新方向进展：**
+
+[Transformers without Normalization](https://arxiv.org/abs/2503.10622) 研究者们通过对Transformer模型中的层归一化（[Layer Normalization](https://zhida.zhihu.com/search?content_id=255090495&content_type=Article&match_order=1&q=Layer+Normalization&zhida_source=entity), LN）进行深入分析，发现LN的输出与输入之间呈现出一种类似于tanh函数的S形曲线。基于这一观察，他们提出了 **动态Tanh（DyT）** ，一种简单的逐元素操作，能够在不计算激活统计量的情况下，模拟LN的行为。
+
+通过实验，他们证明了使用DyT的Transformer模型在多种任务中表现优异，甚至在某些情况下超越了传统的归一化模型。
+
+DyT比[RMSNorm](https://zhida.zhihu.com/search?content_id=255076288&content_type=Article&match_order=1&q=RMSNorm&zhida_source=entity)在H100s上更快，实验数据如下：
+
+<div align="center">
+<img src="../images/llama/dyt_vs_rms_norm.png" width="60%" alt="llama_parameters">
+</div>
+
+这项研究的意义就在于，鉴于模型训练和推理可能需要数千万次的计算，因此DyT有极大潜力帮助降低成本，接下来就是找到应用。
+
+动态Tanh (DyT）的代码实现如下：
+
+```python
+class DyT(nn.Module):
+    def __init__(self, num_features, alpha_init_value=0.5):
+        super().__init__()
+        self.alpha = nn.Parameter(torch.ones(1) * alpha_init_value)
+        self.weight = nn.Parameter(torch.ones(num_features))
+        self.bias = nn.Parameter(torch.zeros(num_features))
+
+
+    def forward(self, x):
+        x = torch.tanh(self.alpha * x)
+        return x * self.weight + self.bias
+```
+
 
 ### 1.4 FFN_SwiGLU
 
@@ -569,3 +615,21 @@ llama3 技术推理角度的总结：
 在**后训练阶段**（post-training），我们沿用了 Llama 3.1 的训练方案，通过多轮的对齐步骤生成最终的聊天模型。每一轮的对齐包括监督微调（SFT）、拒绝采样（RS）和直接偏好优化（DPO）。在这个阶段，我们将模型的上下文长度扩展到了 128K tokens，同时确保模型的质量与预训练模型保持一致。此外，我们还使用合成数据进行训练，经过严格的数据处理和筛选，以确保数据质量。我们通过精心组合这些数据，优化了模型在摘要生成、文本重写、指令执行、语言推理以及工具使用等方面的能力。
 
 Llama 3.2 发布的模型权重采用 `BFloat16` 数字格式。
+
+## 微调方法
+
+在预训练后使用了有监督微调（SFT）、拒绝采样、近端策略优化（PPO）和直接策略优化（DPO）的组合微调算法。 SFT 中使用的提示（Prompt）质量、PPO 和 DPO 中使用的偏好排名对对齐（Align）模型的性能有巨大影响。
+
+
+## 参考资料
+
+1. [Hendrycks and Gimpel, 2016](https://arxiv.org/pdf/1606.08415.pdf)
+2. [GLU Variants Improve Transformer](https://arxiv.org/pdf/2002.05202.pdf)
+3. [llama2介绍(模型结构+参数计算)](https://zhuanlan.zhihu.com/p/647862867)
+4. [知乎-Llama 2详解](https://zhuanlan.zhihu.com/p/649756898)
+5. [详解三种常用标准化 Batch Norm &amp; Layer Norm &amp; RMSNorm](https://blog.csdn.net/wxc971231/article/details/139925707)
+6. [open-llm-components](https://github.com/jeff52415/open-llm-components/tree/main)
+7. [Build Your Own Llama 3 Architecture from Scratch Using PyTorch](https://pub.towardsai.net/build-your-own-llama-3-architecture-from-scratch-using-pytorch-2ce1ecaa901c)
+8. [LLaMA: Open and Efficient Foundation Language Models](https://arxiv.org/pdf/2302.13971)
+9. [Llama 2: Open Foundation and Fine-Tuned Chat Models](https://arxiv.org/pdf/2307.09288)
+10. https://github.com/meta-llama/llama/blob/main/llama/model.py
