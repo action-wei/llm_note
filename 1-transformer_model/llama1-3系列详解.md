@@ -4,13 +4,18 @@
 
 `LLaMA`（Large Language Model Meta AI）是 由 Meta AI 发布的一个开放且高效的大型基础语言模型，共有 `7B`、`13B`、`33B`、`65B`（650 亿）四种版本。其数据集来源都是公开数据集，无任何定制数据集，保证了其工作与开源兼容和可复现，整个训练数据集在 token 化之后大约包含 1.4T 的 token。
 
-关于模型性能，LLaMA 的性能非常优异：具有 130 亿参数的 LLaMA 模型「在大多数基准上」可以**胜过** GPT-3（ 参数量达 1750 亿），而且可以在单块 V100 GPU 上运行；而最大的 650 亿参数的 LLaMA 模型可以媲美谷歌的 Chinchilla-70B 和 PaLM-540B。
+LLaMa 沿着**小 LLM 配大数据训练的指导思想**，训练了一系列性能强悍的语言模型，参数量从 7B 到 65B。例如，LLaMA-13B 比 GPT-3 小10倍，但是在大多数基准测试中都优于 GPT-3。较大点的 65B 的 LLaMa 模型也和 Chinchilla 或者 PaLM-540B 的性能相当。
 
-Hoffmann 等人（2022）最近的工作表明了，在给定的计算预算下，最佳性能不是由最大的模型实现的，而是基于更多数据上的训练较小模型实现的。
+**背景**
 
-和之前的工作相比，`llama` 论文的重点是基于**更多 `tokens` 的训练集，在各种推理预算下，训练出性能最佳的一系列语言模型**，称为 `LLaMA`，参数范围从 `7B` 到 `65B` 不等，与现有最佳 LLM 相比，其性能是有竞争力的。比如，`LLaMA-13B` 在大多数基准测试中优于 `GPT-3`，尽管其尺寸只有 GPT-3 的十分之一。作者相信，LLaMA 将有助于使 LLM 的使用和研究**平民化**，因为它可以在单个 GPU 上运行！在规模较大的情况下，LLaMA-65B 也具有与最佳大型语言模型（如 Chinchilla 或 PaLM-540B）相竞争的能力。
+以 GPT-3 为代表的大语言模型 (Large language models, LLMs) 在海量文本集合上训练，展示出了惊人的涌现能力以及零样本迁移和少样本学习能力。GPT-3 把模型的量级缩放到了 175B，也使得后面的研究工作继续去放大语言模型的量级。在这个背景下，大家好像有一个共识，就是：模型参数量级的增加就会带来同样的性能提升。
 
-LLaMA **优势**在于其**只使用公开可用的数据**，这可以保证论文的工作与开源兼容和可复现。之前的大模型要么使用了不公开的数据集去训练从而达到了 state-of-the-art，如 Chinchilla、PaLM 或 GPT-3；要么使用了公开数据集，但模型效果不是最佳无法和 PaLM-62B 或 Chinchilla 相竞争，如 OPT、GPT-NeoX、BLOOM 和 GLM。
+Hoffmann 等人（2022）在论文 "Training Compute-Optimal Large Language Models" 提出了一种缩放定律（Scaling Law）：
+“训练大语言模型时，在计算成本达到最优情况下，模型大小和训练数据 (token) 的数量应该比例相等地缩放，即：如果模型的大小加倍，那么训练数据的数量也应该加倍。”
+这个定律告诉我们：给定特定的计算成本预算的前提下，语言模型的最佳性能不仅仅可以通过设计较大的模型搭配小一点的数据集得到，也可以通过设计较小的模型配合大量的数据集得到。
+
+那么，相似成本训练 LLM，是大 LLM 配小数据训练，还是小 LLM 配大数据训练更好？
+llama的作者认为 缩放定律在考虑计算成本时，只考虑了计算训练成本，而忽略了推理时的成本。llm模型训练并部署好之后，面对的是海量的推理请求，在这种情况下，我们首选的模型应该是推理最快的LLM，而不是训练最快的。因此对于上面的问题，llama的作者给出的答案是，LLM配大数据训练会更好，因为小LLM推理更友好。
 
 ### 1.1 LLaMA预训练数据
 
@@ -153,7 +158,6 @@ $$
 
 其中，$\gamma$ 是可学习的缩放参数，$\text{eps}$ 的作用是为了保持数值稳定性。$d$ 输入 `tokens` 的数量，大小为 `batch_size * seq_len`。
 
-
 以下是 RMSNorm 在 PyTorch 中的简单实现，使用了 RMS（均方根）来对输入进行归一化处理。
 
 ```python
@@ -203,7 +207,6 @@ else:
 > 输入和输出的形状:  torch.Size([2, 4, 8]) torch.Size([2, 4, 8])
 > 结果验证通过: 自己实现的 RMSNorm 和 pytorch nn.RMSNorm 结果一致！
 
-
 **去归一化层新方向进展：**
 
 [Transformers without Normalization](https://arxiv.org/abs/2503.10622) 研究者们通过对Transformer模型中的层归一化（[Layer Normalization](https://zhida.zhihu.com/search?content_id=255090495&content_type=Article&match_order=1&q=Layer+Normalization&zhida_source=entity), LN）进行深入分析，发现LN的输出与输入之间呈现出一种类似于tanh函数的S形曲线。基于这一观察，他们提出了 **动态Tanh（DyT）** ，一种简单的逐元素操作，能够在不计算激活统计量的情况下，模拟LN的行为。
@@ -233,7 +236,6 @@ class DyT(nn.Module):
         x = torch.tanh(self.alpha * x)
         return x * self.weight + self.bias
 ```
-
 
 ### 1.4 FFN_SwiGLU
 
@@ -346,7 +348,7 @@ print(out.shape) # torch.Size([1, 128])
 
 ### 1.5 RoPE 旋转位置编码
 
-之所以必须使用位置编码，是因为纯粹的 Attention 模块是无法捕捉输入顺序的，即无法理解不同位置的 token 代表的意义不同。比如，输入文本为“我爱苹果”或“苹果爱我”，模型会将这两句话视为相同的内容，因为嵌入中并没有明确的顺序信息让模型去学习。
+Llama 在对序列进行位置编码时，与标准Transformer不一样，Llama 的位置编码在每个Attention层中分别对Q 和 K 进行[RoPE位置编码](https://link.zhihu.com/?target=https%3A//arxiv.org/pdf/2104.09864.pdf)，而不是在Transformer Block之前进行一次位置编码，也就是说每次计算Attention时都分别要对Q 和 K做位置编码。
 
 `RoPE`（Rotary Position Embedding）旋转位置编码，由模型 [RoFormer: Enhanced Transformer with Rotary Position Embedding](https://arxiv.org/pdf/2104.09864v5) 提出。RoPE 的核心思想是将位置编码与词向量通过旋转矩阵相乘，使得词向量不仅包含词汇的语义信息，还融入了位置信息，其具有以下优点：
 
@@ -354,7 +356,7 @@ print(out.shape) # torch.Size([1, 128])
 2. 无需额外的计算：位置编码与词向量的结合在计算上是高效的。
 3. 适应不同长度的序列：RoPE 可以灵活处理不同长度的输入序列。
 
-总结**结合 RoPE 的 self-attention 操作的流程**如下：
+**结合 RoPE 的 self-attention 操作的流程**如下：
 
 1. 首先，对于 `token` 序列中的每个词嵌入向量，都计算其对应的 query 和 key 向量;
 2. 然后在得到 query 和 key 向量的基础上，应用公式（7）和（8）对每个 `token` 位置都计算对应的旋转位置编码；
@@ -619,7 +621,6 @@ Llama 3.2 发布的模型权重采用 `BFloat16` 数字格式。
 ## 微调方法
 
 在预训练后使用了有监督微调（SFT）、拒绝采样、近端策略优化（PPO）和直接策略优化（DPO）的组合微调算法。 SFT 中使用的提示（Prompt）质量、PPO 和 DPO 中使用的偏好排名对对齐（Align）模型的性能有巨大影响。
-
 
 ## 参考资料
 
